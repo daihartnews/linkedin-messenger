@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-import selenium
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -10,12 +9,13 @@ import time
 import re
 import random
 from datetime import datetime
+from tkinter import TclError
 
 class LinkedInMessenger:
     def __init__(self, root):
         self.root = root
         self.root.title("LinkedIn Messenger")
-        self.root.geometry("800x600")
+        self.root.geometry("1000x700")
         self.driver = None
         self.contacts = []
         self.setup_gui()
@@ -39,37 +39,41 @@ class LinkedInMessenger:
         filter_frame = ttk.LabelFrame(self.root, text="Filter Contacts", padding=10)
         filter_frame.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(filter_frame, text="Name:").grid(row=0, column=0, padx=5, pady=5)
-        self.name_filter = ttk.Entry(filter_frame)
-        self.name_filter.grid(row=0, column=1, padx=5, pady=5)
+        filters = [
+            ("Title", "title_filter"), ("First Name", "first_name_filter"), ("Last Name", "last_name_filter"),
+            ("Email", "email_filter"), ("Phone", "phone_filter"), ("Job Title", "job_filter"),
+            ("Industry", "industry_filter"), ("Company", "company_filter")
+        ]
 
-        ttk.Label(filter_frame, text="Job Title:").grid(row=0, column=2, padx=5, pady=5)
-        self.job_filter = ttk.Entry(filter_frame)
-        self.job_filter.grid(row=0, column=3, padx=5, pady=5)
+        for i, (label, attr) in enumerate(filters):
+            ttk.Label(filter_frame, text=f"{label}:").grid(row=i//4, column=(i%4)*2, padx=5, pady=5)
+            entry = ttk.Entry(filter_frame)
+            entry.grid(row=i//4, column=(i%4)*2+1, padx=5, pady=5)
+            setattr(self, attr, entry)
+            # Autocomplete binding
+            entry.bind("<KeyRelease>", lambda e, f=attr: self.autocomplete(f))
 
-        ttk.Label(filter_frame, text="Industry:").grid(row=1, column=0, padx=5, pady=5)
-        self.industry_filter = ttk.Entry(filter_frame)
-        self.industry_filter.grid(row=1, column=1, padx=5, pady=5)
-
-        ttk.Label(filter_frame, text="Company:").grid(row=1, column=2, padx=5, pady=5)
-        self.company_filter = ttk.Entry(filter_frame)
-        self.company_filter.grid(row=1, column=3, padx=5, pady=5)
-
-        ttk.Button(filter_frame, text="Fetch Contacts", command=self.fetch_contacts).grid(row=2, column=0, columnspan=4, pady=10)
+        ttk.Button(filter_frame, text="Fetch Contacts", command=self.fetch_contacts).grid(row=2, column=0, columnspan=8, pady=10)
 
         # Contacts Frame
         contacts_frame = ttk.LabelFrame(self.root, text="Select Contacts", padding=10)
         contacts_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        self.contacts_tree = ttk.Treeview(contacts_frame, columns=("Name", "Job Title", "Company", "Industry"), show="headings")
-        self.contacts_tree.heading("Name", text="Name")
-        self.contacts_tree.heading("Job Title", text="Job Title")
-        self.contacts_tree.heading("Company", text="Company")
-        self.contacts_tree.heading("Industry", text="Industry")
+        columns = ("Select", "Title", "First Name", "Last Name", "Email", "Phone", "Job Title", "Company", "Industry")
+        self.contacts_tree = ttk.Treeview(contacts_frame, columns=columns, show="headings")
+        for col in columns:
+            self.contacts_tree.heading(col, text=col, command=lambda c=col: self.sort_treeview(c))
+            self.contacts_tree.column(col, width=100, anchor="w")
+        self.contacts_tree.column("Select", width=50)
         self.contacts_tree.pack(fill="both", expand=True)
 
-        ttk.Button(contacts_frame, text="Select All", command=self.select_all_contacts).pack(side="left", padx=5)
-        ttk.Button(contacts_frame, text="Deselect All", command=self.deselect_all_contacts).pack(side="left", padx=5)
+        # Bind checkbox toggle
+        self.contacts_tree.bind("<Button-1>", self.toggle_checkbox)
+
+        button_frame = ttk.Frame(contacts_frame)
+        button_frame.pack(fill="x", pady=5)
+        ttk.Button(button_frame, text="Select All", command=self.select_all_contacts).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Deselect All", command=self.deselect_all_contacts).pack(side="left", padx=5)
 
         # Message Frame
         message_frame = ttk.LabelFrame(self.root, text="Message", padding=10)
@@ -150,7 +154,7 @@ class LinkedInMessenger:
 
             # Scroll to load more contacts
             last_height = self.driver.execute_script("return document.body.scrollHeight")
-            for _ in range(3):  # Scroll 3 times
+            for _ in range(3):
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
                 new_height = self.driver.execute_script("return document.body.scrollHeight")
@@ -162,41 +166,57 @@ class LinkedInMessenger:
             for elem in contact_elements:
                 try:
                     name = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name").text
+                    first_name = name.split()[0] if name else ""
+                    last_name = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
                     details = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation").text
-                    # Parse details for job title, company, industry (approximate)
                     job_title = details.split(" at ")[0].strip() if " at " in details else ""
                     company = details.split(" at ")[1].strip() if " at " in details else ""
-                    industry = ""  # LinkedIn doesn't always show industry; leave blank or infer
+                    # Placeholder for fields not always available
+                    title = ""  # E.g., Mr., Ms., Dr. (not typically in LinkedIn UI)
+                    email = ""  # Requires profile access
+                    phone = ""  # Requires profile access
+                    industry = ""  # Infer or leave blank
                     contact = {
-                        "name": name,
+                        "title": title,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "email": email,
+                        "phone": phone,
                         "job_title": job_title,
                         "company": company,
                         "industry": industry,
-                        "element": elem
+                        "element": elem,
+                        "selected": False
                     }
                     self.contacts.append(contact)
                 except:
                     continue
 
             # Apply filters
-            name_filter = self.name_filter.get().lower()
-            job_filter = self.job_filter.get().lower()
-            industry_filter = self.industry_filter.get().lower()
-            company_filter = self.company_filter.get().lower()
+            filters = {
+                "title": self.title_filter.get().lower(),
+                "first_name": self.first_name_filter.get().lower(),
+                "last_name": self.last_name_filter.get().lower(),
+                "email": self.email_filter.get().lower(),
+                "phone": self.phone_filter.get().lower(),
+                "job_title": self.job_filter.get().lower(),
+                "industry": self.industry_filter.get().lower(),
+                "company": self.company_filter.get().lower()
+            }
 
             filtered_contacts = self.contacts
-            if name_filter:
-                filtered_contacts = [c for c in filtered_contacts if name_filter in c["name"].lower()]
-            if job_filter:
-                filtered_contacts = [c for c in filtered_contacts if job_filter in c["job_title"].lower()]
-            if industry_filter:
-                filtered_contacts = [c for c in filtered_contacts if industry_filter in c["industry"].lower()]
-            if company_filter:
-                filtered_contacts = [c for c in filtered_contacts if company_filter in c["company"].lower()]
+            for key, value in filters.items():
+                if value:
+                    filtered_contacts = [c for c in filtered_contacts if value in c[key].lower()]
 
             for contact in filtered_contacts:
                 self.contacts_tree.insert("", "end", values=(
-                    contact["name"],
+                    "☐",  # Checkbox (unselected)
+                    contact["title"],
+                    contact["first_name"],
+                    contact["last_name"],
+                    contact["email"],
+                    contact["phone"],
                     contact["job_title"],
                     contact["company"],
                     contact["industry"]
@@ -207,20 +227,83 @@ class LinkedInMessenger:
             self.log(f"Error fetching contacts: {str(e)}")
             messagebox.showerror("Error", f"Failed to fetch contacts: {str(e)}")
 
+    def autocomplete(self, filter_attr):
+        entry = getattr(self, filter_attr)
+        current_text = entry.get().lower()
+        if not current_text:
+            return
+
+        suggestions = set()
+        for contact in self.contacts:
+            value = contact[filter_attr.replace("_filter", "")].lower()
+            if value and current_text in value:
+                suggestions.add(contact[filter_attr.replace("_filter", "")])
+
+        if suggestions:
+            suggestion_text = f"Suggestions: {', '.join(list(suggestions)[:5])}"
+            self.log(suggestion_text)
+        else:
+            self.log("No matching suggestions")
+
+    def sort_treeview(self, col):
+        items = [(self.contacts_tree.set(k, col), k) for k in self.contacts_tree.get_children()]
+        items.sort()
+        for index, (val, k) in enumerate(items):
+            self.contacts_tree.move(k, "", index)
+
+    def toggle_checkbox(self, event):
+        try:
+            item = self.contacts_tree.identify_row(event.y)
+            if not item:
+                return
+            column = self.contacts_tree.identify_column(event.x)
+            if column != "#1":  # Only toggle on Select column
+                return
+
+            values = list(self.contacts_tree.item(item)["values"])
+            current = values[0]
+            new_state = "☑" if current == "☐" else "☐"
+            values[0] = new_state
+            self.contacts_tree.item(item, values=values)
+
+            # Update contact's selected state
+            for contact in self.contacts:
+                if (contact["first_name"] == values[2] and
+                    contact["last_name"] == values[3] and
+                    contact["job_title"] == values[6]):
+                    contact["selected"] = (new_state == "☑")
+        except TclError:
+            pass
+
     def select_all_contacts(self):
         for item in self.contacts_tree.get_children():
-            self.contacts_tree.selection_add(item)
+            values = list(self.contacts_tree.item(item)["values"])
+            values[0] = "☑"
+            self.contacts_tree.item(item, values=values)
+            for contact in self.contacts:
+                if (contact["first_name"] == values[2] and
+                    contact["last_name"] == values[3] and
+                    contact["job_title"] == values[6]):
+                    contact["selected"] = True
 
     def deselect_all_contacts(self):
-        self.contacts_tree.selection_remove(self.contacts_tree.selection())
+        for item in self.contacts_tree.get_children():
+            values = list(self.contacts_tree.item(item)["values"])
+            values[0] = "☐"
+            self.contacts_tree.item(item, values=values)
+            for contact in self.contacts:
+                if (contact["first_name"] == values[2] and
+                    contact["last_name"] == values[3] and
+                    contact["job_title"] == values[6]):
+                    contact["selected"] = False
 
     def load_template(self, event):
         self.message_text.delete("1.0", tk.END)
         self.message_text.insert("1.0", self.template_combo.get())
 
     def preview_message(self):
-        selected = self.contacts_tree.selection()
-        if not selected:
+        selected_contacts = [c for c in self.contacts if c["selected"]]
+        if not selected_contacts:
             messagebox.showwarning("Warning", "No contacts selected")
             return
 
@@ -230,30 +313,27 @@ class LinkedInMessenger:
             return
 
         preview = ""
-        for item in selected[:3]:  # Show preview for up to 3 contacts
-            values = self.contacts_tree.item(item)["values"]
-            name = values[0]
-            first_name = name.split()[0]
-            job_title = values[1]
-            company = values[2]
-            industry = values[3]
+        for contact in selected_contacts[:3]:
             formatted_message = message.format(
-                first_name=first_name,
-                name=name,
-                job_title=job_title,
-                company=company,
-                industry=industry
+                title=contact["title"],
+                first_name=contact["first_name"],
+                last_name=contact["last_name"],
+                email=contact["email"],
+                phone=contact["phone"],
+                job_title=contact["job_title"],
+                company=contact["company"],
+                industry=contact["industry"]
             )
-            preview += f"To {name}:\n{formatted_message}\n\n"
+            preview += f"To {contact['first_name']} {contact['last_name']}:\n{formatted_message}\n\n"
 
-        if len(selected) > 3:
-            preview += f"...and {len(selected) - 3} more contacts"
+        if len(selected_contacts) > 3:
+            preview += f"...and {len(selected_contacts) - 3} more contacts"
 
         messagebox.showinfo("Message Preview", preview)
 
     def send_messages(self):
-        selected = self.contacts_tree.selection()
-        if not selected:
+        selected_contacts = [c for c in self.contacts if c["selected"]]
+        if not selected_contacts:
             messagebox.showwarning("Warning", "No contacts selected")
             return
 
@@ -262,50 +342,40 @@ class LinkedInMessenger:
             messagebox.showwarning("Warning", "No message entered")
             return
 
-        if not messagebox.askyesno("Confirm", f"Send message to {len(selected)} contacts?"):
+        if not messagebox.askyesno("Confirm", f"Send message to {len(selected_contacts)} contacts?"):
             return
 
-        self.progress["maximum"] = len(selected)
+        self.progress["maximum"] = len(selected_contacts)
         self.progress["value"] = 0
 
         try:
-            for i, item in enumerate(selected):
-                values = self.contacts_tree.item(item)["values"]
-                name = values[0]
-                first_name = name.split()[0]
-                job_title = values[1]
-                company = values[2]
-                industry = values[3]
-
-                # Find corresponding contact
-                contact = next(c for c in self.contacts if c["name"] == name and c["job_title"] == job_title)
+            for contact in selected_contacts:
                 element = contact["element"]
-
-                # Click message button
                 message_button = element.find_element(By.CSS_SELECTOR, "button[aria-label*='Message']")
                 message_button.click()
                 time.sleep(2)
 
-                # Format and send message
                 formatted_message = message.format(
-                    first_name=first_name,
-                    name=name,
-                    job_title=job_title,
-                    company=company,
-                    industry=industry
+                    title=contact["title"],
+                    first_name=contact["first_name"],
+                    last_name=contact["last_name"],
+                    email=contact["email"],
+                    phone=contact["phone"],
+                    job_title=contact["job_title"],
+                    company=contact["company"],
+                    industry=contact["industry"]
                 )
                 message_input = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__contenteditable")
                 message_input.send_keys(formatted_message)
                 send_button = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__send-button")
                 send_button.click()
-                time.sleep(random.uniform(3, 5))  # Random delay to mimic human behavior
+                time.sleep(random.uniform(3, 5))
 
-                # Close message window
                 close_button = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Dismiss']")
                 close_button.click()
                 time.sleep(1)
 
-                self.log(f"Sent message to {name}")
+                self.log(f"Sent message to {contact['first_name']} {contact['last_name']}")
                 self.progress["value"] += 1
                 self.root.update()
 
