@@ -182,23 +182,44 @@ class LinkedInMessenger:
             self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(3)
 
-            # Continuous scrolling to load all contacts
-            while True:
+            # Continuous scrolling with retries
+            prev_contact_count = 0
+            max_retries = 5
+            retries = 0
+            while retries < max_retries:
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                time.sleep(random.uniform(3, 5))  # Random delay for loading
                 contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card")
-                if len(contact_elements) == len(self.contacts):  # No new contacts loaded
-                    break
+                current_contact_count = len(contact_elements)
+
+                # Check for "Load more" button
+                try:
+                    load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more')]")
+                    load_more_button.click()
+                    time.sleep(2)
+                    self.log("Clicked 'Load more' button")
+                except:
+                    pass  # No "Load more" button found
+
+                if current_contact_count == prev_contact_count:
+                    retries += 1
+                    self.log(f"No new contacts loaded (retry {retries}/{max_retries})")
+                    time.sleep(2)  # Wait before retrying
+                    continue
+                else:
+                    retries = 0  # Reset retries on successful load
+                    prev_contact_count = current_contact_count
+
                 self.contacts = []  # Clear to avoid duplicates
+                skipped = 0
                 for elem in contact_elements:
                     try:
                         name = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name").text.strip()
                         details = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation").text.strip()
                         job_title = details.split(" at ")[0].strip() if " at " in details else details
                         company = details.split(" at ")[1].strip() if " at " in details else ""
-                        industry = ""  # LinkedIn doesn't consistently provide industry
-                        if name:  # Only add valid contacts
+                        industry = ""
+                        if name:
                             contact = {
                                 "name": name,
                                 "job_title": job_title,
@@ -208,8 +229,14 @@ class LinkedInMessenger:
                                 "selected": False
                             }
                             self.contacts.append(contact)
-                    except:
+                        else:
+                            skipped += 1
+                    except Exception as e:
+                        skipped += 1
+                        self.log(f"Skipped contact due to error: {str(e)}")
                         continue
+
+                self.log(f"Loaded {len(self.contacts)} contacts (skipped {skipped})")
 
             # Apply filters
             name_filter = self.name_filter.get().lower().strip()
