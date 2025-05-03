@@ -180,42 +180,50 @@ class LinkedInMessenger:
             self.contacts_tree.delete(*self.contacts_tree.get_children())
             self.contacts = []
             self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-            time.sleep(3)
+            time.sleep(5)  # Wait for initial page load
 
             # Continuous scrolling with retries
             prev_contact_count = 0
-            max_retries = 5
+            max_retries = 10
             retries = 0
-            while retries < max_retries:
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(random.uniform(3, 5))  # Random delay for loading
-                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card")
-                current_contact_count = len(contact_elements)
+            max_duration = 300  # 5 minutes max
+            start_time = time.time()
+            scroll_position = 0
+            while retries < max_retries and (time.time() - start_time) < max_duration:
+                # Incremental scrolling
+                scroll_position += 1000
+                self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
+                time.sleep(random.uniform(3, 5))  # Wait for contacts to load
 
-                # Check for "Load more" button
+                # Check for "Load more" or similar button
                 try:
-                    load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more')]")
+                    load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or @aria-label='Load more results']")
                     load_more_button.click()
-                    time.sleep(2)
-                    self.log("Clicked 'Load more' button")
+                    self.log("Clicked 'Load more' or similar button")
+                    time.sleep(random.uniform(2, 4))
                 except:
-                    pass  # No "Load more" button found
+                    pass  # No button found
+
+                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
+                current_contact_count = len(contact_elements)
 
                 if current_contact_count == prev_contact_count:
                     retries += 1
-                    self.log(f"No new contacts loaded (retry {retries}/{max_retries})")
-                    time.sleep(2)  # Wait before retrying
+                    self.log(f"No new contacts loaded (retry {retries}/{max_retries}, {current_contact_count} contacts)")
+                    time.sleep(random.uniform(3, 5))  # Longer wait for retries
                     continue
                 else:
-                    retries = 0  # Reset retries on successful load
+                    retries = 0
                     prev_contact_count = current_contact_count
 
                 self.contacts = []  # Clear to avoid duplicates
                 skipped = 0
                 for elem in contact_elements:
                     try:
-                        name = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name").text.strip()
-                        details = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation").text.strip()
+                        name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                        name = name_elem.text.strip() if name_elem else ""
+                        details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
+                        details = details_elem.text.strip() if details_elem else ""
                         job_title = details.split(" at ")[0].strip() if " at " in details else details
                         company = details.split(" at ")[1].strip() if " at " in details else ""
                         industry = ""
@@ -231,6 +239,7 @@ class LinkedInMessenger:
                             self.contacts.append(contact)
                         else:
                             skipped += 1
+                            self.log("Skipped contact: No name found")
                     except Exception as e:
                         skipped += 1
                         self.log(f"Skipped contact due to error: {str(e)}")
@@ -265,6 +274,8 @@ class LinkedInMessenger:
                 ))
 
             self.log(f"Fetched {len(self.contacts)} contacts, displayed {len(filtered_contacts)} after filtering")
+            if len(self.contacts) < 1000:
+                self.log("Warning: Fetched fewer contacts than expected (~1200). LinkedIn may be limiting visibility.")
             self.update_preview(None)
         except Exception as e:
             self.log(f"Error fetching contacts: {str(e)}")
@@ -355,77 +366,8 @@ class LinkedInMessenger:
                             name=contact["name"],
                             job_title=contact["job_title"],
                             company=contact["company"],
-                            industry=contact["industry"]
-                        )
-                        self.selected_text.insert(tk.END, f"To {contact['name']}:\n{formatted_message}\n\n")
-                    except KeyError:
-                        self.selected_text.insert(tk.END, f"Error: Invalid placeholder for {contact['name']}\n")
-                if len(selected_contacts) > 3:
-                    self.selected_text.insert(tk.END, f"...and {len(selected_contacts) - 3} more contacts\n")
-        else:
-            self.selected_text.insert(tk.END, "No contacts selected.\n")
-
-        self.selected_text.configure(state="disabled")
-        self.selected_text.see(tk.END)
-
-    def send_messages(self):
-        selected_contacts = [c for c in self.contacts if c["selected"]]
-        if not selected_contacts:
-            messagebox.showwarning("Warning", "No contacts selected")
-            return
-
-        message = self.message_text.get("1.0", tk.END).strip()
-        if not message:
-            messagebox.showwarning("Warning", "No message entered")
-            return
-
-        if not messagebox.askyesno("Confirm", f"Send message to {len(selected_contacts)} contacts?"):
-            return
-
-        self.progress["maximum"] = len(selected_contacts)
-        self.progress["value"] = 0
-
-        try:
-            for contact in selected_contacts:
-                element = contact["element"]
-                message_button = element.find_element(By.CSS_SELECTOR, "button[aria-label*='Message']")
-                message_button.click()
-                time.sleep(2)
-
-                first_name = contact["name"].split()[0]
-                formatted_message = message.format(
-                    first_name=first_name,
-                    name=contact["name"],
-                    job_title=contact["job_title"],
-                    company=contact["company"],
-                    industry=contact["industry"]
-                )
-                message_input = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__contenteditable")
-                message_input.send_keys(formatted_message)
-                send_button = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__send-button")
-                send_button.click()
-                time.sleep(random.uniform(3, 5))
-
-                close_button = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Dismiss']")
-                close_button.click()
-                time.sleep(1)
-
-                self.log(f"Sent message to {contact['name']}")
-                self.progress["value"] += 1
-                self.root.update()
-
-            messagebox.showinfo("Success", "Messages sent successfully")
-        except Exception as e:
-            self.log(f"Error sending messages: {str(e)}")
-            messagebox.showerror("Error", f"Failed to send messages: {str(e)}")
-        finally:
-            self.progress["value"] = 0
-
-    def __del__(self):
-        if self.driver:
-            self.driver.quit()
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = LinkedInMessenger(root)
-    root.mainloop()
+                            industry parlor.py
+                            if __name__ == "__main__":
+                                root = tk.Tk()
+                                app = LinkedInMessenger(root)
+                                root.mainloop()
