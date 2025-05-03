@@ -7,8 +7,9 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 import random
-import csv
+import json
 import os
+import csv
 import threading
 from datetime import datetime, timedelta
 
@@ -22,13 +23,14 @@ class LinkedInMessenger:
         self.sort_column = None
         self.sort_reverse = False
         self.csv_file = "contacts.csv"
+        self.json_file = "contacts.json"
         self.last_survey_file = "last_survey.txt"
         self.setup_gui()
-        self.load_contacts_from_csv()
+        self.load_contacts()
+        self.update_filter_suggestions()
         self.start_background_survey()
 
     def setup_gui(self):
-        # Main layout: Four quadrants using PanedWindow
         main_pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         main_pane.pack(fill="both", expand=True)
 
@@ -37,7 +39,6 @@ class LinkedInMessenger:
         main_pane.add(left_pane, weight=1)
         main_pane.add(right_pane, weight=1)
 
-        # 1st Quadrant: Login, Filters, and CSV Operations
         q1_frame = ttk.LabelFrame(left_pane, text="Login & Filters", padding=10)
         left_pane.add(q1_frame, weight=1)
 
@@ -51,7 +52,6 @@ class LinkedInMessenger:
 
         ttk.Button(q1_frame, text="Login", command=self.login_linkedin).grid(row=2, column=0, columnspan=2, pady=5)
 
-        # Filter fields with Combobox for auto-suggestions
         ttk.Label(q1_frame, text="Name:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
         self.name_filter = ttk.Combobox(q1_frame, width=27, postcommand=self.update_filter_suggestions)
         self.name_filter.grid(row=3, column=1, padx=5, pady=5)
@@ -68,17 +68,15 @@ class LinkedInMessenger:
         self.industry_filter = ttk.Combobox(q1_frame, width=27, postcommand=self.update_filter_suggestions)
         self.industry_filter.grid(row=6, column=1, padx=5, pady=5)
 
-        # Buttons and Progress Bar
         button_frame = ttk.Frame(q1_frame)
         button_frame.grid(row=7, column=0, columnspan=2, pady=5)
-        ttk.Button(button_frame, text="Fetch Contacts", command=self.fetch_contacts).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Search Contacts", command=self.search_contacts).pack(side="left", padx=5)
         ttk.Button(button_frame, text="Save to CSV", command=self.save_contacts_to_csv).pack(side="left", padx=5)
         ttk.Button(button_frame, text="Upload CSV", command=self.upload_csv).pack(side="left", padx=5)
 
         self.search_progress = ttk.Progressbar(q1_frame, mode="determinate")
         self.search_progress.grid(row=8, column=0, columnspan=2, pady=5, sticky="ew")
 
-        # 2nd Quadrant: Contacts Table
         q2_frame = ttk.LabelFrame(left_pane, text="Contacts", padding=10)
         left_pane.add(q2_frame, weight=2)
 
@@ -112,7 +110,6 @@ class LinkedInMessenger:
         ttk.Button(button_frame, text="Select All", command=self.select_all_contacts).pack(side="left", padx=5)
         ttk.Button(button_frame, text="Deselect All", command=self.deselect_all_contacts).pack(side="left", padx=5)
 
-        # 3rd Quadrant: Message Composition and Selected Contacts
         q3_frame = ttk.LabelFrame(right_pane, text="Message", padding=10)
         right_pane.add(q3_frame, weight=1)
 
@@ -122,7 +119,7 @@ class LinkedInMessenger:
 
         ttk.Label(q3_frame, text="Template:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.template_combo = ttk.Combobox(q3_frame, values=[
-            "Hi {first_name}, I noticed your work at {company}. Let's connect!",
+            "Hi {first_name}, I noticed your work at {company, let's connect!",
             "Hello {first_name}, I'm impressed by your role as {job_title}. Can we chat?",
             "Hi {first_name}, I'm in {industry} too. Let's discuss opportunities!"
         ], width=50)
@@ -133,7 +130,6 @@ class LinkedInMessenger:
         self.message_text.grid(row=3, column=0, columnspan=2, padx=5, pady=5)
         self.message_text.bind("<KeyRelease>", self.update_preview)
 
-        # 4th Quadrant: Progress and Logs
         q4_frame = ttk.LabelFrame(right_pane, text="Status", padding=10)
         right_pane.add(q4_frame, weight=2)
 
@@ -149,11 +145,20 @@ class LinkedInMessenger:
         self.log_text.configure(state="disabled")
         self.log_text.see(tk.END)
 
-    def load_contacts_from_csv(self):
-        if os.path.exists(self.csv_file):
+    def load_contacts(self):
+        if os.path.exists(self.json_file):
+            try:
+                with open(self.json_file, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+                    self.contacts = [{"name": d["name"], "job_title": d.get("job_title", ""), "company": d.get("company", ""), "industry": d.get("industry", ""), "element": None, "selected": False} for d in data]
+                self.log(f"Loaded {len(self.contacts)} contacts from {self.json_file}")
+            except Exception as e:
+                self.log(f"Error loading from JSON: {str(e)}")
+        elif os.path.exists(self.csv_file):
             try:
                 with open(self.csv_file, mode="r", encoding="utf-8") as file:
                     reader = csv.DictReader(file)
+                    self.contacts = []
                     for row in reader:
                         contact = {
                             "name": row["name"],
@@ -165,11 +170,19 @@ class LinkedInMessenger:
                         }
                         self.contacts.append(contact)
                 self.log(f"Loaded {len(self.contacts)} contacts from {self.csv_file}")
-                self.display_contacts(self.contacts)
             except Exception as e:
-                self.log(f"Error loading CSV: {str(e)}")
+                self.log(f"Error loading from CSV: {str(e)}")
         else:
-            self.log(f"No CSV file found at {self.csv_file}")
+            self.log("No contacts file found")
+
+    def save_contacts_to_json(self):
+        try:
+            with open(self.json_file, "w", encoding="utf-8") as file:
+                json.dump([{"name": c["name"], "job_title": c["job_title"], "company": c["company"], "industry": c["industry"]} for c in self.contacts], file, ensure_ascii=False, indent=4)
+            self.log(f"Saved {len(self.contacts)} contacts to {self.json_file}")
+        except Exception as e:
+            self.log(f"Error saving to JSON: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save contacts to JSON: {str(e)}")
 
     def save_contacts_to_csv(self):
         try:
@@ -185,8 +198,8 @@ class LinkedInMessenger:
                     })
             self.log(f"Saved {len(self.contacts)} contacts to {self.csv_file}")
         except Exception as e:
-            self.log(f"Error saving CSV: {str(e)}")
-            messagebox.showerror("Error", f"Failed to save CSV: {str(e)}")
+            self.log(f"Error saving to CSV: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save contacts to CSV: {str(e)}")
 
     def upload_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
@@ -256,7 +269,7 @@ class LinkedInMessenger:
                 self.driver.quit()
                 self.driver = None
 
-    def fetch_contacts(self):
+    def search_contacts(self):
         # First, try filtering local contacts
         filtered_contacts = self.apply_filters(self.contacts)
         self.search_progress["maximum"] = len(self.contacts) or 1
@@ -268,7 +281,7 @@ class LinkedInMessenger:
             self.search_progress["value"] = len(self.contacts)
             return
 
-        # Fetch from LinkedIn if no local matches or no filters
+        # Search from LinkedIn if no local matches or no filters
         if not self.driver:
             messagebox.showerror("Error", "Please log in first")
             return
@@ -279,93 +292,63 @@ class LinkedInMessenger:
             self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(5)
 
-            prev_contact_count = 0
-            max_retries = 10
-            retries = 0
-            max_duration = 300
-            start_time = time.time()
-            scroll_position = 0
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            while True:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(3, 5))
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
+
+            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
             existing_names = {c["name"] for c in self.contacts}
 
-            while retries < max_retries and (time.time() - start_time) < max_duration:
-                scroll_position += 1000
-                self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                time.sleep(random.uniform(3, 5))
-
+            for elem in contact_elements:
                 try:
-                    load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or @aria-label='Load more results']")
-                    load_more_button.click()
-                    self.log("Clicked 'Load more' or similar button")
-                    time.sleep(random.uniform(2, 4))
-                except:
-                    pass
-
-                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
-                current_contact_count = len(contact_elements)
-
-                if current_contact_count == prev_contact_count:
-                    retries += 1
-                    self.log(f"No new contacts loaded (retry {retries}/{max_retries}, {current_contact_count} contacts)")
-                    time.sleep(random.uniform(3, 5))
+                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                    name = name_elem.text.strip() if name_elem else ""
+                    details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
+                    details = details_elem.text.strip() if details_elem else ""
+                    job_title = details.split(" at ")[0].strip() if " at " in details else details
+                    company = details.split(" at ")[1].strip() if " at " in details else ""
+                    industry = ""
+                    if name and name not in existing_names:
+                        contact = {
+                            "name": name,
+                            "job_title": job_title,
+                            "company": company,
+                            "industry": industry,
+                            "element": elem,
+                            "selected": False
+                        }
+                        new_contacts.append(contact)
+                        existing_names.add(name)
+                except Exception as e:
+                    self.log(f"Skipped contact due to error: {str(e)}")
                     continue
-                else:
-                    retries = 0
-                    prev_contact_count = current_contact_count
 
-                new_contacts = []
-                skipped = 0
-                for elem in contact_elements:
-                    try:
-                        name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                        name = name_elem.text.strip() if name_elem else ""
-                        details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
-                        details = details_elem.text.strip() if details_elem else ""
-                        job_title = details.split(" at ")[0].strip() if " at " in details else details
-                        company = details.split(" at ")[1].strip() if " at " in details else ""
-                        industry = ""
-                        if name and name not in existing_names:
-                            contact = {
-                                "name": name,
-                                "job_title": job_title,
-                                "company": company,
-                                "industry": industry,
-                                "element": elem,
-                                "selected": False
-                            }
-                            new_contacts.append(contact)
-                            existing_names.add(name)
-                        else:
-                            skipped += 1
-                            if not name:
-                                self.log("Skipped contact: No name found")
-                    except Exception as e:
-                        skipped += 1
-                        self.log(f"Skipped contact due to error: {str(e)}")
-                        continue
-
-                self.contacts.extend(new_contacts)
-                self.log(f"Loaded {len(new_contacts)} new contacts (skipped {skipped})")
-
-            self.save_contacts_to_csv()
+            self.contacts.extend(new_contacts)
+            self.save_contacts_to_json()
             filtered_contacts = self.apply_filters(self.contacts)
             self.display_contacts(filtered_contacts)
-            self.log(f"Fetched {len(self.contacts)} total contacts, displayed {len(filtered_contacts)} after filtering")
+            self.log(f"Searched {len(self.contacts)} total contacts, displayed {len(filtered_contacts)} after filtering")
             if len(self.contacts) < 1000:
-                self.log("Warning: Fetched fewer contacts than expected (~1200). LinkedIn may be limiting visibility.")
+                self.log("Warning: Searched fewer contacts than expected (~1200). LinkedIn may be limiting visibility.")
             self.update_filter_suggestions()
         except Exception as e:
-            self.log(f"Error fetching contacts: {str(e)}")
-            messagebox.showerror("Error", f"Failed to fetch contacts: {str(e)}")
+            self.log(f"Error searching contacts: {str(e)}")
+            messagebox.showerror("Error", f"Failed to search contacts: {str(e)}")
         finally:
             self.search_progress["value"] = len(self.contacts)
 
     def apply_filters(self, contacts):
-        name_filters = self.name_filter.get().lower().strip().split(";") if self.name_filter.get() else []
-        job_filters = self.job_filter.get().lower().strip().split(";") if self.job_filter.get() else []
-        company_filters = self.company_filter.get().lower().strip().split(";") if self.company_filter.get() else []
-        industry_filters = self.industry_filter.get().lower().strip().split(";") if self.industry_filter.get() else []
+        name_filters = [n.strip() for n in self.name_filter.get().lower().split(";") if n.strip()]
+        job_filters = [j.strip() for j in self.job_filter.get().lower().split(";") if j.strip()]
+        company_filters = [c.strip() for c in self.company_filter.get().lower().split(";") if c.strip()]
+        industry_filters = [i.strip() for i in self.industry_filter.get().lower().split(";") if i.strip()]
 
-        filtered_contacts = contacts
+        filtered_contacts = []
         self.search_progress["maximum"] = len(contacts) or 1
         for i, contact in enumerate(contacts):
             self.search_progress["value"] = i + 1
@@ -376,7 +359,7 @@ class LinkedInMessenger:
                 continue
             if company_filters and not any(c in contact["company"].lower() for c in company_filters):
                 continue
-            if industry_filters and not any(ind in contact["industry"].lower() for ind in industry_filters):
+            if industry_filters and not any(i in contact["industry"].lower() for i in industry_filters):
                 continue
             filtered_contacts.append(contact)
         self.search_progress["value"] = len(contacts)
@@ -416,66 +399,45 @@ class LinkedInMessenger:
             self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(5)
 
-            prev_contact_count = 0
-            max_retries = 10
-            retries = 0
-            max_duration = 300
-            start_time = time.time()
-            scroll_position = 0
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            while True:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(3, 5))
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
+
+            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
             existing_names = {c["name"] for c in self.contacts}
             new_contacts = []
 
-            while retries < max_retries and (time.time() - start_time) < max_duration:
-                scroll_position += 1000
-                self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                time.sleep(random.uniform(3, 5))
-
+            for elem in contact_elements:
                 try:
-                    load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or @aria-label='Load more results']")
-                    load_more_button.click()
-                    self.log("Clicked 'Load more' or similar button in survey")
-                    time.sleep(random.uniform(2, 4))
+                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                    name = name_elem.text.strip() if name_elem else ""
+                    details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
+                    details = details_elem.text.strip() if details_elem else ""
+                    job_title = details.split(" at ")[0].strip() if " at " in details else details
+                    company = details.split(" at ")[1].strip() if " at " in details else ""
+                    industry = ""
+                    if name and name not in existing_names:
+                        contact = {
+                            "name": name,
+                            "job_title": job_title,
+                            "company": company,
+                            "industry": industry,
+                            "element": None,
+                            "selected": False
+                        }
+                        new_contacts.append(contact)
+                        existing_names.add(name)
                 except:
-                    pass
-
-                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
-                current_contact_count = len(contact_elements)
-
-                if current_contact_count == prev_contact_count:
-                    retries += 1
-                    self.log(f"No new contacts in survey (retry {retries}/{max_retries}, {current_contact_count} contacts)")
-                    time.sleep(random.uniform(3, 5))
                     continue
-                else:
-                    retries = 0
-                    prev_contact_count = current_contact_count
-
-                for elem in contact_elements:
-                    try:
-                        name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                        name = name_elem.text.strip() if name_elem else ""
-                        details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
-                        details = details_elem.text.strip() if details_elem else ""
-                        job_title = details.split(" at ")[0].strip() if " at " in details else details
-                        company = details.split(" at ")[1].strip() if " at " in details else ""
-                        industry = ""
-                        if name and name not in existing_names:
-                            contact = {
-                                "name": name,
-                                "job_title": job_title,
-                                "company": company,
-                                "industry": industry,
-                                "element": None,
-                                "selected": False
-                            }
-                            new_contacts.append(contact)
-                            existing_names.add(name)
-                    except:
-                        continue
 
             if new_contacts:
                 self.contacts.extend(new_contacts)
-                self.save_contacts_to_csv()
+                self.save_contacts_to_json()
                 self.log(f"Survey added {len(new_contacts)} new contacts")
             else:
                 self.log("Survey found no new contacts")
@@ -575,59 +537,4 @@ class LinkedInMessenger:
 
         message = self.message_text.get("1.0", tk.END).strip()
         if not message:
-            messagebox.showwarning("Warning", "No message entered")
-            return
-
-        if not messagebox.askyesno("Confirm", f"Send message to {len(selected_contacts)} contacts?"):
-            return
-
-        self.send_progress["maximum"] = len(selected_contacts)
-        self.send_progress["value"] = 0
-
-        try:
-            for i, contact in enumerate(selected_contacts):
-                if not contact["element"]:
-                    self.log(f"Skipping {contact['name']}: No LinkedIn element (loaded from CSV)")
-                    continue
-                element = contact["element"]
-                message_button = element.find_element(By.CSS_SELECTOR, "button[aria-label*='Message']")
-                message_button.click()
-                time.sleep(2)
-
-                first_name = contact["name"].split()[0]
-                formatted_message = message.format(
-                    first_name=first_name,
-                    name=contact["name"],
-                    job_title=contact["job_title"],
-                    company=contact["company"],
-                    industry=contact["industry"]
-                )
-                message_input = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__contenteditable")
-                message_input.send_keys(formatted_message)
-                send_button = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__send-button")
-                send_button.click()
-                time.sleep(random.uniform(3, 5))
-
-                close_button = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Dismiss']")
-                close_button.click()
-                time.sleep(1)
-
-                self.log(f"Sent message to {contact['name']}")
-                self.send_progress["value"] = i + 1
-                self.root.update()
-
-            messagebox.showinfo("Success", "Messages sent successfully")
-        except Exception as e:
-            self.log(f"Error sending messages: {str(e)}")
-            messagebox.showerror("Error", f"Failed to send messages: {str(e)}")
-        finally:
-            self.send_progress["value"] = 0
-
-    def __del__(self):
-        if self.driver:
-            self.driver.quit()
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = LinkedInMessenger(root)
-    root.mainloop()
+            messagebox
