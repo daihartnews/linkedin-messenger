@@ -744,12 +744,11 @@ class LinkedInMessenger:
                             break
                     self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
                     self.root.update()
-
                 self.root.after(0, lambda: self.log(f"Messages sent successfully to {len(selected_contacts)} contacts"))
             except Exception as e:
                 self.root.after(0, lambda: self.log(f"Error sending messages: {str(e)}"))
             finally:
- jaka            self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
+                self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
 
         threading.Thread(target=send, daemon=True).start()
 
