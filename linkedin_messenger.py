@@ -245,7 +245,7 @@ class LinkedInMessenger:
         def login():
             try:
                 self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-                self.driver.get("[invalid url, do not cite]")
+                self.driver.get("https://www.linkedin.com/login")
                 time.sleep(2)
 
                 email_field = self.driver.find_element(By.ID, "username")
@@ -291,76 +291,46 @@ class LinkedInMessenger:
             try:
                 self.root.after(0, lambda: self.contacts_tree.delete(*self.contacts_tree.get_children()))
                 new_contacts = []
-                self.driver.get("[invalid url, do not cite]")
+                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
                 time.sleep(5)
 
-                prev_contact_count = 0
-                max_retries = 10
-                retries = 0
-                max_duration = 300
-                start_time = time.time()
-                scroll_position = 0
+                last_height = self.driver.execute_script("return document.body.scrollHeight")
+                while True:
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(random.uniform(3, 5))
+                    new_height = self.driver.execute_script("return document.body.scrollHeight")
+                    if new_height == last_height:
+                        break
+                    last_height = new_height
+
+                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
                 existing_names = {c["name"] for c in self.contacts}
 
-                while retries < max_retries and (time.time() - start_time) < max_duration:
-                    scroll_position += 1000
-                    self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                    time.sleep(random.uniform(3, 5))
-
+                for elem in contact_elements:
                     try:
-                        load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or @aria-label='Load more results']")
-                        load_more_button.click()
-                        self.root.after(0, lambda: self.log("Clicked 'Load more' or similar button"))
-                        time.sleep(random.uniform(2, 4))
-                    except:
-                        pass
-
-                    contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
-                    current_contact_count = len(contact_elements)
-
-                    if current_contact_count == prev_contact_count:
-                        retries += 1
-                        self.root.after(0, lambda: self.log(f"No new contacts loaded (retry {retries}/{max_retries}, {current_contact_count} contacts)"))
-                        time.sleep(random.uniform(3, 5))
+                        name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                        name = name_elem.text.strip() if name_elem else ""
+                        details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
+                        details = details_elem.text.strip() if details_elem else ""
+                        job_title = details.split(" at ")[0].strip() if " at " in details else details
+                        company = details.split(" at ")[1].strip() if " at " in details else ""
+                        industry = ""
+                        if name and name not in existing_names:
+                            contact = {
+                                "name": name,
+                                "job_title": job_title,
+                                "company": company,
+                                "industry": industry,
+                                "element": elem,
+                                "selected": False
+                            }
+                            new_contacts.append(contact)
+                            existing_names.add(name)
+                    except Exception as e:
+                        self.root.after(0, lambda: self.log(f"Skipped contact due to error: {str(e)}"))
                         continue
-                    else:
-                        retries = 0
-                        prev_contact_count = current_contact_count
 
-                    new_contacts = []
-                    skipped = 0
-                    for elem in contact_elements:
-                        try:
-                            name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                            name = name_elem.text.strip() if name_elem else ""
-                            details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
-                            details = details_elem.text.strip() if details_elem else ""
-                            job_title = details.split(" at ")[0].strip() if " at " in details else details
-                            company = details.split(" at ")[1].strip() if " at " in details else ""
-                            industry = ""
-                            if name and name not in existing_names:
-                                contact = {
-                                    "name": name,
-                                    "job_title": job_title,
-                                    "company": company,
-                                    "industry": industry,
-                                    "element": elem,
-                                    "selected": False
-                                }
-                                new_contacts.append(contact)
-                                existing_names.add(name)
-                            else:
-                                skipped += 1
-                                if not name:
-                                    self.root.after(0, lambda: self.log("Skipped contact: No name found"))
-                        except Exception as e:
-                            skipped += 1
-                            self.root.after(0, lambda: self.log(f"Skipped contact due to error: {str(e)}"))
-                            continue
-
-                    self.contacts.extend(new_contacts)
-                    self.root.after(0, lambda: self.log(f"Loaded {len(new_contacts)} new contacts (skipped {skipped})"))
-
+                self.contacts.extend(new_contacts)
                 self.root.after(0, self.save_contacts_to_json)
                 filtered_contacts = self.apply_filters(self.contacts)
                 self.root.after(0, lambda: self.display_contacts(filtered_contacts))
@@ -424,72 +394,217 @@ class LinkedInMessenger:
     def should_survey(self):
         if not os.path.exists(self.last_survey_file):
             return True
-        with open(self.last_survey_file, "r") as file:
-            last_survey = datetime.fromisoformat(file.read().strip())
-        return datetime.now() - last_survey >= timedelta(days=14)
+        try:
+            with open(self.last_survey_file, "r") as file:
+                last_survey = datetime.fromisoformat(file.read().strip())
+            return datetime.now() - last_survey >= timedelta(days=14)
+        except Exception as e:
+            self.log(f"Error reading survey timestamp: {str(e)}")
+            return True
 
     def survey_linkedin_contacts(self):
         try:
-            self.driver.get("[invalid url, do not cite]")
+            self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(5)
 
-            prev_contact_count = 0
-            max_retries = 10
-            retries = 0
-            max_duration = 300
-            start_time = time.time()
-            scroll_position = 0
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            while True:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(random.uniform(3, 5))
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
+
+            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
             existing_names = {c["name"] for c in self.contacts}
             new_contacts = []
 
-            while retries < max_retries and (time.time() - start_time) < max_duration:
-                scroll_position += 1000
-                self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                time.sleep(random.uniform(3, 5))
-
+            for elem in contact_elements:
                 try:
-                    load_more_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or @aria-label='Load more results']")
-                    load_more_button.click()
-                    self.log("Clicked 'Load more' or similar button in survey")
-                    time.sleep(random.uniform(2, 4))
-                except:
-                    pass
-
-                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
-                current_contact_count = len(contact_elements)
-
-                if current_contact_count == prev_contact_count:
-                    retries += 1
-                    self.log(f"No new contacts in survey (retry {retries}/{max_retries}, {current_contact_count} contacts)")
-                    time.sleep(random.uniform(3, 5))
+                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                    name = name_elem.text.strip() if name_elem else ""
+                    details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
+                    details = details_elem.text.strip() if details_elem else ""
+                    job_title = details.split(" at ")[0].strip() if " at " in details else details
+                    company = details.split(" at ")[1].strip() if " at " in details else ""
+                    industry = ""
+                    if name and name not in existing_names:
+                        contact = {
+                            "name": name,
+                            "job_title": job_title,
+                            "company": company,
+                            "industry": industry,
+                            "element": None,
+                            "selected": False
+                        }
+                        new_contacts.append(contact)
+                        existing_names.add(name)
+                except Exception as e:
+                    self.log(f"Skipped contact in survey due to error: {str(e)}")
                     continue
-                else:
-                    retries = 0
-                    prev_contact_count = current_contact_count
 
-                for elem in contact_elements:
+            if new_contacts:
+                self.contacts.extend(new_contacts)
+                self.save_contacts_to_json()
+                self.log(f"Survey added {len(new_contacts)} new contacts")
+            else:
+                self.log("Survey found no new contacts")
+
+            try:
+                with open(self.last_survey_file, "w") as file:
+                    file.write(datetime.now().isoformat())
+            except Exception as e:
+                self.log(f"Error writing survey timestamp: {str(e)}")
+        except Exception as e:
+            self.log(f"Survey error: {str(e)}")
+
+    def handle_tree_click(self, event):
+        item = self.contacts_tree.identify_row(event.y)
+        column = self.contacts_tree.identify_column(event.x)
+        if item and column == "#1":
+            contact_name = self.contacts_tree.item(item)["values"][1]
+            contact = next(c for c in self.contacts if c["name"] == contact_name)
+            contact["selected"] = not contact["selected"]
+            self.contacts_tree.item(item, values=(
+                "☑" if contact["selected"] else "☐",
+                contact["name"],
+                contact["job_title"],
+                contact["company"],
+                contact["industry"]
+            ))
+            self.update_preview(None)
+
+    def sort_contacts(self, column):
+        if self.sort_column == column:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            self.sort_reverse = False
+            self.sort_column = column
+
+        col_map = {
+            "Name": "name",
+            "Job Title": "job_title",
+            "Company": "company",
+            "Industry": "industry"
+        }
+        key = col_map[column]
+
+        sorted_contacts = sorted(self.contacts, key=lambda x: x[key].lower() if x[key] else "", reverse=self.sort_reverse)
+        self.display_contacts(sorted_contacts)
+
+    def select_all_contacts(self):
+        for contact in self.contacts:
+            contact["selected"] = True
+        self.display_contacts(self.contacts)
+
+    def deselect_all_contacts(self):
+        for contact in self.contacts:
+            contact["selected"] = False
+        self.display_contacts(self.contacts)
+
+    def load_template(self, event):
+        self.message_text.delete("1.0", tk.END)
+        self.message_text.insert("1.0", self.template_combo.get())
+        self.update_preview(None)
+
+    def update_preview(self, event):
+        self.selected_text.configure(state="normal")
+        self.selected_text.delete("1.0", tk.END)
+        selected_contacts = [c for c in self.contacts if c["selected"]]
+        message = self.message_text.get("1.0", tk.END).strip()
+
+        if selected_contacts:
+            self.selected_text.insert(tk.END, "Selected Contacts:\n")
+            for contact in selected_contacts:
+                self.selected_text.insert(tk.END, f"- {contact['name']}\n")
+            if message:
+                self.selected_text.insert(tk.END, "\nMessage Preview:\n")
+                for contact in selected_contacts[:3]:
+                    first_name = contact["name"].split()[0]
                     try:
-                        name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                        name = name_elem.text.strip() if name_elem else ""
-                        details_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__occupation, .connection-card__occupation, .t-14.t-black--light")
-                        details = details_elem.text.strip() if details_elem else ""
-                        job_title = details.split(" at ")[0].strip() if " at " in details else details
-                        company = details.split(" at ")[1].strip() if " at " in details else ""
-                        industry = ""
-                        if name and name not in existing_names:
-                            contact = {
-                                "name": name,
-                                "job_title": job_title,
-                                "company": company,
-                                "industry": industry,
-                                "element": None,
-                                "selected": False
-                            }
-                            new_contacts.append(contact)
-                            existing_names.add(name)
-                    except:
-                        continue
+                        formatted_message = message.format(
+                            first_name=first_name,
+                            name=contact["name"],
+                            job_title=contact["job_title"],
+                            company=contact["company"],
+                            industry=contact["industry"]
+                        )
+                        self.selected_text.insert(tk.END, f"To {contact['name']}:\n{formatted_message}\n\n")
+                    except KeyError:
+                        self.selected_text.insert(tk.END, f"Error: Invalid placeholder for {contact['name']}\n")
+                if len(selected_contacts) > 3:
+                    self.selected_text.insert(tk.END, f"...and {len(selected_contacts) - 3} more contacts\n")
+        else:
+            self.selected_text.insert(tk.END, "No contacts selected.\n")
 
-                if new_contacts:
-                    self.contacts.extend(new_contacts)
-                    self.save
+        self.selected_text.configure(state="disabled")
+        self.selected_text.see(tk.END)
+
+    def send_messages(self):
+        selected_contacts = [c for c in self.contacts if c["selected"]]
+        if not selected_contacts:
+            messagebox.showwarning("Warning", "No contacts selected")
+            return
+
+        message = self.message_text.get("1.0", tk.END).strip()
+        if not message:
+            messagebox.showwarning("Warning", "No message entered")
+            return
+
+        if not messagebox.askyesno("Confirm", f"Send message to {len(selected_contacts)} contacts?"):
+            return
+
+        self.send_progress["maximum"] = len(selected_contacts)
+        self.send_progress["value"] = 0
+
+        def send():
+            try:
+                for i, contact in enumerate(selected_contacts):
+                    if not contact["element"]:
+                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: No LinkedIn element (loaded from JSON/CSV)"))
+                        continue
+                    element = contact["element"]
+                    message_button = element.find_element(By.CSS_SELECTOR, "button[aria-label*='Message']")
+                    message_button.click()
+                    time.sleep(2)
+
+                    first_name = contact["name"].split()[0]
+                    formatted_message = message.format(
+                        first_name=first_name,
+                        name=contact["name"],
+                        job_title=contact["job_title"],
+                        company=contact["company"],
+                        industry=contact["industry"]
+                    )
+                    message_input = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__contenteditable")
+                    message_input.send_keys(formatted_message)
+                    send_button = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__send-button")
+                    send_button.click()
+                    time.sleep(random.uniform(3, 5))
+
+                    close_button = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Dismiss']")
+                    close_button.click()
+                    time.sleep(1)
+
+                    self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
+                    self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
+                    self.root.update()
+
+                self.root.after(0, lambda: messagebox.showinfo("Success", "Messages sent successfully"))
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"Error sending messages: {str(e)}"))
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to send messages: {str(e)}"))
+            finally:
+                self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
+
+        threading.Thread(target=send, daemon=True).start()
+
+    def __del__(self):
+        if self.driver:
+            self.driver.quit()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LinkedInMessenger(root)
+    root.mainloop()
