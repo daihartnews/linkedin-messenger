@@ -563,85 +563,124 @@ class LinkedInMessenger:
         def send():
             try:
                 for i, contact in enumerate(selected_contacts):
-                    try:
-                        # If contact has no element, search for it on the connections page
-                        if not contact["element"]:
-                            self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-                            time.sleep(random.uniform(3, 5))
-                            search_input = WebDriverWait(self.driver, 10).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search connections']"))
-                            )
-                            search_input.clear()
-                            search_input.send_keys(contact["name"])
-                            search_input.send_keys(Keys.RETURN)
-                            time.sleep(random.uniform(2, 4))
-                            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
-                            contact_element = None
-                            for elem in contact_elements:
-                                name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                                if name_elem.text.strip() == contact["name"]:
-                                    contact_element = elem
-                                    break
-                            if not contact_element:
-                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact on LinkedIn"))
-                                self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
-                                continue
-                        else:
-                            contact_element = contact["element"]
-
-                        # Try to find the Message button
+                    max_retries = 2
+                    for attempt in range(max_retries):
                         try:
-                            message_button = WebDriverWait(self.driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message')]"))
+                            # If contact has no element, search for it on the connections page
+                            if not contact["element"]:
+                                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                                time.sleep(random.uniform(3, 5))
+                                search_input = WebDriverWait(self.driver, 15).until(
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search connections']"))
+                                )
+                                search_input.clear()
+                                search_input.send_keys(contact["name"])
+                                search_input.send_keys(Keys.RETURN)
+                                time.sleep(random.uniform(2, 4))
+                                contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
+                                contact_element = None
+                                for elem in contact_elements:
+                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                    if name_elem.text.strip() == contact["name"]:
+                                        contact_element = elem
+                                        break
+                                if not contact_element:
+                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact on LinkedIn"))
+                                    self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
+                                    break
+                            else:
+                                contact_element = contact["element"]
+
+                            # Try to find the Message button
+                            try:
+                                message_button = WebDriverWait(self.driver, 15).until(
+                                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message')]"))
+                                )
+                                message_button.click()
+                                time.sleep(random.uniform(1, 2))
+                            except Exception as e:
+                                error_msg = str(e)
+                                self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to find message button for {contact['name']}: {error_msg}"))
+                                if attempt < max_retries - 1:
+                                    self.driver.refresh()
+                                    time.sleep(random.uniform(2, 4))
+                                    continue
+                                # Fallback: Navigate to profile page
+                                try:
+                                    profile_link = contact_element.find_element(By.CSS_SELECTOR, "a[href*='/in/']")
+                                    profile_url = profile_link.get_attribute("href")
+                                    self.driver.get(profile_url)
+                                    time.sleep(random.uniform(2, 4))
+                                    message_button = WebDriverWait(self.driver, 15).until(
+                                        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message')]"))
+                                    )
+                                    message_button.click()
+                                    time.sleep(random.uniform(1, 2))
+                                except Exception as e:
+                                    error_msg = str(e)
+                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to find message button on profile page: {error_msg}"))
+                                    break
+
+                            # Send the message
+                            first_name = contact["name"].split()[0]
+                            formatted_message = message.format(
+                                first_name=first_name,
+                                name=contact["name"],
+                                job_title=contact["job_title"],
+                                company=contact["company"],
+                                industry=contact["industry"]
                             )
-                            message_button.click()
-                            time.sleep(random.uniform(1, 2))
-                        except:
-                            # Fallback: Navigate to profile page
-                            profile_link = contact_element.find_element(By.CSS_SELECTOR, "a[href*='/in/']")
-                            profile_url = profile_link.get_attribute("href")
-                            self.driver.get(profile_url)
-                            time.sleep(random.uniform(2, 4))
-                            message_button = WebDriverWait(self.driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message')]"))
-                            )
-                            message_button.click()
-                            time.sleep(random.uniform(1, 2))
+                            try:
+                                message_input = WebDriverWait(self.driver, 15).until(
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable"))
+                                )
+                                message_input.send_keys(formatted_message)
+                                time.sleep(random.uniform(0.5, 1))
+                                send_button = WebDriverWait(self.driver, 15).until(
+                                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".msg-form__send-button"))
+                                )
+                                send_button.click()
+                                time.sleep(random.uniform(1, 2))
+                            except Exception as e:
+                                error_msg = str(e)
+                                self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to send message to {contact['name']}: {error_msg}"))
+                                if attempt < max_retries - 1:
+                                    self.driver.refresh()
+                                    time.sleep(random.uniform(2, 4))
+                                    continue
+                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to send message: {error_msg}"))
+                                break
 
-                        # Send the message
-                        first_name = contact["name"].split()[0]
-                        formatted_message = message.format(
-                            first_name=first_name,
-                            name=contact["name"],
-                            job_title=contact["job_title"],
-                            company=contact["company"],
-                            industry=contact["industry"]
-                        )
-                        message_input = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable"))
-                        )
-                        message_input.send_keys(formatted_message)
-                        time.sleep(random.uniform(0.5, 1))
-                        send_button = WebDriverWait(self.driver, 10).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, ".msg-form__send-button"))
-                        )
-                        send_button.click()
-                        time.sleep(random.uniform(1, 2))
+                            # Close the message window
+                            try:
+                                close_button = WebDriverWait(self.driver, 15).until(
+                                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Close your conversation'], button[aria-label*='Dismiss']"))
+                                )
+                                close_button.click()
+                                time.sleep(random.uniform(0.5, 1))
+                            except Exception as e:
+                                error_msg = str(e)
+                                self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to close message window for {contact['name']}: {error_msg}"))
+                                if attempt < max_retries - 1:
+                                    self.driver.refresh()
+                                    time.sleep(random.uniform(2, 4))
+                                    continue
+                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to close message window: {error_msg}"))
+                                break
 
-                        # Close the message window
-                        close_button = WebDriverWait(self.driver, 10).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Close your conversation'], button[aria-label*='Dismiss']"))
-                        )
-                        close_button.click()
-                        time.sleep(random.uniform(0.5, 1))
-
-                        self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
-                    except Exception as e:
-                        error_msg = str(e)
-                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Error sending message: {error_msg}"))
-                    finally:
-                        self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
-                        self.root.update()
+                            self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
+                            break  # Success, exit retry loop
+                        except Exception as e:
+                            error_msg = str(e)
+                            self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Unexpected error for {contact['name']}: {error_msg}"))
+                            if attempt < max_retries - 1:
+                                self.driver.refresh()
+                                time.sleep(random.uniform(2, 4))
+                                continue
+                            self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Unexpected error after retries: {error_msg}"))
+                            break
+                    self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
+                    self.root.update()
 
                 self.root.after(0, lambda: self.log(f"Messages sent successfully to {len(selected_contacts)} contacts"))
             except Exception as e:
