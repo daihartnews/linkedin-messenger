@@ -366,8 +366,77 @@ class LinkedInMessenger:
                             name=contact["name"],
                             job_title=contact["job_title"],
                             company=contact["company"],
-                            industry parlor.py
-                            if __name__ == "__main__":
-                                root = tk.Tk()
-                                app = LinkedInMessenger(root)
-                                root.mainloop()
+                            industry=contact["industry"]
+                        )
+                        self.selected_text.insert(tk.END, f"To {contact['name']}:\n{formatted_message}\n\n")
+                    except KeyError:
+                        self.selected_text.insert(tk.END, f"Error: Invalid placeholder for {contact['name']}\n")
+                if len(selected_contacts) > 3:
+                    self.selected_text.insert(tk.END, f"...and {len(selected_contacts) - 3} more contacts\n")
+        else:
+            self.selected_text.insert(tk.END, "No contacts selected.\n")
+
+        self.selected_text.configure(state="disabled")
+        self.selected_text.see(tk.END)
+
+    def send_messages(self):
+        selected_contacts = [c for c in self.contacts if c["selected"]]
+        if not selected_contacts:
+            messagebox.showwarning("Warning", "No contacts selected")
+            return
+
+        message = self.message_text.get("1.0", tk.END).strip()
+        if not message:
+            messagebox.showwarning("Warning", "No message entered")
+            return
+
+        if not messagebox.askyesno("Confirm", f"Send message to {len(selected_contacts)} contacts?"):
+            return
+
+        self.progress["maximum"] = len(selected_contacts)
+        self.progress["value"] = 0
+
+        try:
+            for contact in selected_contacts:
+                element = contact["element"]
+                message_button = element.find_element(By.CSS_SELECTOR, "button[aria-label*='Message']")
+                message_button.click()
+                time.sleep(2)
+
+                first_name = contact["name"].split()[0]
+                formatted_message = message.format(
+                    first_name=first_name,
+                    name=contact["name"],
+                    job_title=contact["job_title"],
+                    company=contact["company"],
+                    industry=contact["industry"]
+                )
+                message_input = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__contenteditable")
+                message_input.send_keys(formatted_message)
+                send_button = self.driver.find_element(By.CSS_SELECTOR, ".msg-form__send-button")
+                send_button.click()
+                time.sleep(random.uniform(3, 5))
+
+                close_button = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Dismiss']")
+                close_button.click()
+                time.sleep(1)
+
+                self.log(f"Sent message to {contact['name']}")
+                self.progress["value"] += 1
+                self.root.update()
+
+            messagebox.showinfo("Success", "Messages sent successfully")
+        except Exception as e:
+            self.log(f"Error sending messages: {str(e)}")
+            messagebox.showerror("Error", f"Failed to send messages: {str(e)}")
+        finally:
+            self.progress["value"] = 0
+
+    def __del__(self):
+        if self.driver:
+            self.driver.quit()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LinkedInMessenger(root)
+    root.mainloop()
