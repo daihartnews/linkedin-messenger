@@ -273,7 +273,6 @@ class LinkedInMessenger:
         threading.Thread(target=login, daemon=True).start()
 
     def search_contacts(self):
-        # First, try filtering local contacts
         filtered_contacts = self.apply_filters(self.contacts)
         self.search_progress["maximum"] = len(self.contacts) or 1
         self.search_progress["value"] = 0
@@ -284,7 +283,6 @@ class LinkedInMessenger:
             self.search_progress["value"] = len(self.contacts)
             return
 
-        # Search from LinkedIn if no local matches or no filters
         if not self.driver:
             messagebox.showerror("Error", "Please log in first")
             return
@@ -492,12 +490,6 @@ class LinkedInMessenger:
                     except:
                         continue
 
-            if new_contacts:
-                self.contacts.extend(new_contacts)
-                self.save_contacts_to_json()
-                self.log(f"Survey added {len(new_contacts)} new contacts")
-            else:
-                self.log("Survey found no new contacts")
-
-            with open(self.last_survey_file, "w") as file:
-                file.write
+                if new_contacts:
+                    self.contacts.extend(new_contacts)
+                    self.save
