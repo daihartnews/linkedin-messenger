@@ -546,15 +546,20 @@ class LinkedInMessenger:
     def check_page_state(self):
         try:
             WebDriverWait(self.driver, 5).until(lambda d: d.execute_script("return document.readyState") == "complete")
-            if self.driver.find_elements(By.CSS_SELECTOR, "div[id*='captcha']"):
-                self.log("CAPTCHA detected on page")
+            page_title = self.driver.title
+            if "login" in self.driver.current_url.lower():
+                self.log(f"Session invalid on page '{page_title}', login required")
                 return False
-            if self.driver.find_elements(By.CSS_SELECTOR, "h1[contains(text(), 'restricted')]"):
-                self.log("Account restricted by LinkedIn")
+            if self.driver.find_elements(By.CSS_SELECTOR, "[id*='captcha']"):
+                self.log(f"CAPTCHA detected on page '{page_title}'. Please resolve manually in the browser and press OK.")
+                self.root.after(0, lambda: messagebox.showinfo("CAPTCHA", "Please resolve the CAPTCHA in the browser and press OK to continue."))
+                return False
+            if self.driver.find_elements(By.XPATH, "//h1[contains(text(), 'restricted')]"):
+                self.log(f"Account restricted on page '{page_title}'")
                 return False
             return True
         except Exception as e:
-            self.log(f"Error checking page state: {str(e)}")
+            self.log(f"Error checking page state on '{self.driver.title}' at {self.driver.current_url}: {str(e)}")
             return False
 
     def send_messages(self):
@@ -586,12 +591,17 @@ class LinkedInMessenger:
                                 self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid (CAPTCHA or restriction)"))
                                 break
 
-                            # If contact has no element, search for it
-                            if not contact["element"]:
+                            # Ensure on connections page
+                            if "mynetwork/invite-connect/connections" not in self.driver.current_url:
+                                self.root.after(0, lambda: self.log(f"Navigating to connections page for {contact['name']}"))
                                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                                time.sleep(random.uniform(4, 7))
                                 if not self.check_page_state():
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to load connections page"))
                                     break
+
+                            # If contact has no element, search for it
+                            if not contact["element"]:
                                 self.root.after(0, lambda: self.log(f"Searching for {contact['name']}"))
                                 try:
                                     search_input = WebDriverWait(self.driver, 15).until(
@@ -600,7 +610,7 @@ class LinkedInMessenger:
                                     search_input.clear()
                                     search_input.send_keys(contact["name"])
                                     search_input.send_keys(Keys.RETURN)
-                                    time.sleep(random.uniform(3, 6))
+                                    time.sleep(random.uniform(4, 7))
                                     contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
                                     contact_element = None
                                     for elem in contact_elements:
@@ -739,7 +749,7 @@ class LinkedInMessenger:
             except Exception as e:
                 self.root.after(0, lambda: self.log(f"Error sending messages: {str(e)}"))
             finally:
-                self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
+ jaka            self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
 
         threading.Thread(target=send, daemon=True).start()
 
