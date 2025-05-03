@@ -14,7 +14,7 @@ import os
 import csv
 import threading
 from datetime import datetime, timedelta
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException, ElementNotInteractableException
 
 class LinkedInMessenger:
     def __init__(self, root):
@@ -550,12 +550,16 @@ class LinkedInMessenger:
             if "login" in self.driver.current_url.lower():
                 self.log(f"Session invalid on page '{page_title}', login required")
                 return False
-            if self.driver.find_elements(By.CSS_SELECTOR, "[id*='captcha']"):
+            if self.driver.find_elements(By.CSS_SELECTOR, "[id*='captcha'], [class*='captcha']"):
                 self.log(f"CAPTCHA detected on page '{page_title}'. Please resolve manually in the browser and press OK.")
                 self.root.after(0, lambda: messagebox.showinfo("CAPTCHA", "Please resolve the CAPTCHA in the browser and press OK to continue."))
                 return False
             if self.driver.find_elements(By.XPATH, "//h1[contains(text(), 'restricted')]"):
                 self.log(f"Account restricted on page '{page_title}'")
+                return False
+            if self.driver.find_elements(By.XPATH, "//*[contains(text(), 'weekly limit') or contains(text(), 'reached the limit')]"):
+                self.log(f"Rate limit detected on page '{page_title}'. Please wait and try again later.")
+                self.root.after(0, lambda: messagebox.showwarning("Rate Limit", "LinkedIn has imposed a rate limit. Please wait and try again later."))
                 return False
             return True
         except Exception as e:
@@ -582,6 +586,14 @@ class LinkedInMessenger:
 
         def send():
             try:
+                # Ensure starting on connections page
+                self.root.after(0, lambda: self.log("Navigating to connections page"))
+                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                time.sleep(random.uniform(4, 7))
+                if not self.check_page_state():
+                    self.root.after(0, lambda: self.log("Failed to load connections page. Aborting messaging."))
+                    return
+
                 for i, contact in enumerate(selected_contacts):
                     max_retries = 2
                     for attempt in range(max_retries):
@@ -604,9 +616,18 @@ class LinkedInMessenger:
                             if not contact["element"]:
                                 self.root.after(0, lambda: self.log(f"Searching for {contact['name']}"))
                                 try:
-                                    search_input = WebDriverWait(self.driver, 15).until(
-                                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search connections']"))
-                                    )
+                                    # Try CSS selector first
+                                    search_input = None
+                                    try:
+                                        search_input = WebDriverWait(self.driver, 20).until(
+                                            EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search']"))
+                                        )
+                                    except TimeoutException:
+                                        # Fallback to XPath
+                                        self.root.after(0, lambda: self.log(f"CSS selector failed, trying XPath for search input"))
+                                        search_input = WebDriverWait(self.driver, 20).until(
+                                            EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Search')]"))
+                                        )
                                     search_input.clear()
                                     search_input.send_keys(contact["name"])
                                     search_input.send_keys(Keys.RETURN)
@@ -625,8 +646,36 @@ class LinkedInMessenger:
                                         self.root.after(0, lambda: self.log(f"Retrying search for {contact['name']}"))
                                         if attempt < max_retries - 1:
                                             continue
+                                        # Log page source snippet for debugging
+                                        try:
+                                            search_area = self.driver.find_element(By.CSS_SELECTOR, "section.mn-connections").get_attribute("outerHTML")[:500]
+                                            self.root.after(0, lambda: self.log(f"Search area HTML: {search_area}"))
+                                        except:
+                                            self.root.after(0, lambda: self.log("Failed to capture search area HTML"))
                                         self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact on LinkedIn"))
                                         break
+                                except TimeoutException:
+                                    self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Search input not found for {contact['name']}"))
+                                    if attempt < max_retries - 1:
+                                        self.driver.refresh()
+                                        time.sleep(random.uniform(2, 4))
+                                        continue
+                                    # Log page source snippet for debugging
+                                    try:
+                                        search_area = self.driver.find_element(By.CSS_SELECTOR, "section.mn-connections").get_attribute("outerHTML")[:500]
+                                        self.root.after(0, lambda: self.log(f"Search area HTML: {search_area}"))
+                                    except:
+                                        self.root.after(0, lambda: self.log("Failed to capture search area HTML"))
+                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Search input not found"))
+                                    break
+                                except ElementNotInteractableException:
+                                    self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Search input not interactable for {contact['name']}"))
+                                    if attempt < max_retries - 1:
+                                        self.driver.refresh()
+                                        time.sleep(random.uniform(2, 4))
+                                        continue
+                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Search input not interactable"))
+                                    break
                                 except Exception as e:
                                     error_msg = str(e)
                                     self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to search for {contact['name']}: {error_msg}"))
@@ -645,7 +694,7 @@ class LinkedInMessenger:
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before clicking message button"))
                                     break
                                 self.root.after(0, lambda: self.log(f"Clicking message button for {contact['name']}"))
-                                message_button = WebDriverWait(self.driver, 15).until(
+                                message_button = WebDriverWait(self.driver, 20).until(
                                     EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message') or contains(@class, 'msg')]"))
                                 )
                                 message_button.click()
@@ -666,7 +715,7 @@ class LinkedInMessenger:
                                         self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to load profile page"))
                                         break
                                     time.sleep(random.uniform(2, 4))
-                                    message_button = WebDriverWait(self.driver, 15).until(
+                                    message_button = WebDriverWait(self.driver, 20).until(
                                         EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message') or contains(@class, 'msg')]"))
                                     )
                                     message_button.click()
@@ -690,12 +739,12 @@ class LinkedInMessenger:
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before sending message"))
                                     break
                                 self.root.after(0, lambda: self.log(f"Sending message to {contact['name']}"))
-                                message_input = WebDriverWait(self.driver, 15).until(
+                                message_input = WebDriverWait(self.driver, 20).until(
                                     EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable"))
                                 )
                                 message_input.send_keys(formatted_message)
                                 time.sleep(random.uniform(0.5, 1.5))
-                                send_button = WebDriverWait(self.driver, 15).until(
+                                send_button = WebDriverWait(self.driver, 20).until(
                                     EC.element_to_be_clickable((By.CSS_SELECTOR, ".msg-form__send-button"))
                                 )
                                 send_button.click()
@@ -716,7 +765,7 @@ class LinkedInMessenger:
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before closing message window"))
                                     break
                                 self.root.after(0, lambda: self.log(f"Closing message window for {contact['name']}"))
-                                close_button = WebDriverWait(self.driver, 15).until(
+                                close_button = WebDriverWait(self.driver, 20).until(
                                     EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Close your conversation'], button[aria-label*='Dismiss']"))
                                 )
                                 close_button.click()
