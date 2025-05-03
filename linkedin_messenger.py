@@ -184,7 +184,6 @@ class LinkedInMessenger:
             self.log(f"Saved {len(self.contacts)} contacts to {self.json_file}")
         except Exception as e:
             self.log(f"Error saving to JSON: {str(e)}")
-            messagebox.showerror("Error", f"Failed to save contacts to JSON: {str(e)}")
 
     def save_contacts_to_csv(self):
         try:
@@ -201,7 +200,6 @@ class LinkedInMessenger:
             self.log(f"Saved {len(self.contacts)} contacts to {self.csv_file}")
         except Exception as e:
             self.log(f"Error saving to CSV: {str(e)}")
-            messagebox.showerror("Error", f"Failed to save contacts to CSV: {str(e)}")
 
     def upload_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
@@ -260,13 +258,13 @@ class LinkedInMessenger:
                 time.sleep(5)
 
                 if "login" in self.driver.current_url:
+                    self.root.after(0, lambda: self.log("Login failed: Check credentials"))
                     self.root.after(0, lambda: messagebox.showerror("Error", "Login failed. Check credentials."))
                     self.driver.quit()
                     self.driver = None
                     return
 
                 self.root.after(0, lambda: self.log("Logged in successfully"))
-                self.root.after(0, lambda: messagebox.showinfo("Success", "Logged in to LinkedIn"))
             except Exception as e:
                 self.root.after(0, lambda: self.log(f"Login error: {str(e)}"))
                 self.root.after(0, lambda: messagebox.showerror("Error", f"Login failed: {str(e)}"))
@@ -344,7 +342,6 @@ class LinkedInMessenger:
                 self.root.after(0, self.update_filter_suggestions)
             except Exception as e:
                 self.root.after(0, lambda: self.log(f"Error searching contacts: {str(e)}"))
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to search contacts: {str(e)}"))
             finally:
                 self.root.after(0, lambda: setattr(self.search_progress, "value", len(self.contacts)))
 
@@ -548,15 +545,16 @@ class LinkedInMessenger:
     def send_messages(self):
         selected_contacts = [c for c in self.contacts if c["selected"]]
         if not selected_contacts:
-            messagebox.showwarning("Warning", "No contacts selected")
+            self.log("No contacts selected for messaging")
             return
 
         message = self.message_text.get("1.0", tk.END).strip()
         if not message:
-            messagebox.showwarning("Warning", "No message entered")
+            self.log("No message entered for sending")
             return
 
-        if not messagebox.askyesno("Confirm", f"Send message to {len(selected_contacts)} contacts?"):
+        if not self.driver:
+            messagebox.showerror("Error", "Please log in first")
             return
 
         self.send_progress["maximum"] = len(selected_contacts)
@@ -639,15 +637,15 @@ class LinkedInMessenger:
 
                         self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
                     except Exception as e:
-                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Error sending message: {str(e)}"))
+                        error_msg = str(e)
+                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Error sending message: {error_msg}"))
                     finally:
                         self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
                         self.root.update()
 
-                self.root.after(0, lambda: messagebox.showinfo("Success", "Messages sent successfully"))
+                self.root.after(0, lambda: self.log(f"Messages sent successfully to {len(selected_contacts)} contacts"))
             except Exception as e:
                 self.root.after(0, lambda: self.log(f"Error sending messages: {str(e)}"))
-                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to send messages: {str(e)}"))
             finally:
                 self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
 
