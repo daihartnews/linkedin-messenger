@@ -552,7 +552,6 @@ class LinkedInMessenger:
             return False
 
     def normalize_name(self, name):
-        """Normalize name for search and URL construction."""
         name = re.sub(r'\s+', ' ', name.strip()).lower()
         name = re.sub(r'[^\w\s-]', '', name)
         return name.replace(' ', '-')
@@ -579,7 +578,6 @@ class LinkedInMessenger:
         def send():
             nonlocal successful_sends
             try:
-                # Navigate to connections page
                 self.root.after(0, lambda: self.log("Navigating to connections page"))
                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
                 time.sleep(random.uniform(6, 10))
@@ -597,7 +595,6 @@ class LinkedInMessenger:
                                 self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid (CAPTCHA, restriction, or session expired)"))
                                 break
 
-                            # Ensure on connections page
                             if "mynetwork/invite-connect/connections" not in self.driver.current_url:
                                 self.root.after(0, lambda: self.log(f"Navigating to connections page for {contact['name']}"))
                                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
@@ -606,7 +603,6 @@ class LinkedInMessenger:
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to load connections page"))
                                     break
 
-                            # Check if contact exists on connections page
                             contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card, .search-result__wrapper")
                             for elem in contact_elements:
                                 try:
@@ -622,11 +618,10 @@ class LinkedInMessenger:
                             if contact_found and contact["element"]:
                                 contact_element = contact["element"]
                             else:
-                                # Search for the contact
                                 self.root.after(0, lambda: self.log(f"Searching for {contact['name']}"))
                                 search_input = None
                                 try:
-                                    for _ in range(2):  # Retry search input
+                                    for _ in range(2):
                                         try:
                                             search_input = WebDriverWait(self.driver, 40).until(
                                                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search'][type='text']"))
@@ -644,10 +639,8 @@ class LinkedInMessenger:
                                             break
                                     if not search_input:
                                         raise TimeoutException("Search input not found after retries")
-                                    # Clear previous search
                                     search_input.clear()
                                     time.sleep(random.uniform(0.5, 1.0))
-                                    # Simulate typing
                                     for char in contact["name"]:
                                         search_input.send_keys(char)
                                         time.sleep(random.uniform(0.1, 0.2))
@@ -655,16 +648,28 @@ class LinkedInMessenger:
                                     search_input.send_keys(Keys.RETURN)
                                     time.sleep(random.uniform(6, 10))
 
-                                    # Check for search results container
                                     try:
+                                        # Check for iframe and switch to it
+                                        try:
+                                            WebDriverWait(self.driver, 5).until(
+                                                EC.frame_to_be_available_and_switch_to_it((By.TAG_NAME, "iframe"))
+                                            )
+                                            self.root.after(0, lambda: self.log(f"Switched to iframe for {contact['name']}"))
+                                        except TimeoutException:
+                                            self.root.after(0, lambda: self.log(f"No iframe found for {contact['name']}, continuing in default content"))
+                                            self.driver.switch_to.default_content()
+
+                                        # Wait for search results container
                                         WebDriverWait(self.driver, 40).until(
-                                            EC.presence_of_element_located((By.CSS_SELECTOR, ".scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']"))
+                                            EC.presence_of_element_located((
+                                                By.CSS_SELECTOR, 
+                                                ".search-results-container, .scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']"
+                                            ))
                                         )
                                         self.root.after(0, lambda: self.log(f"Search results container found for {contact['name']}"))
                                     except TimeoutException:
                                         self.root.after(0, lambda: self.log(f"No search results container found for {contact['name']}"))
 
-                                    # Log all contact names found
                                     contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".search-result__wrapper, li[class*='search-result'], li.reusable-search__result-container, .mn-connection-card, .connection-card")
                                     found_names = []
                                     for elem in contact_elements:
@@ -686,18 +691,21 @@ class LinkedInMessenger:
                                                 break
                                         except StaleElementReferenceException:
                                             continue
+                                    
+                                    # Switch back to default content
+                                    self.driver.switch_to.default_content()
+                                    self.root.after(0, lambda: self.log(f"Switched back to default content for {contact['name']}"))
+
                                     if not contact_element:
                                         self.root.after(0, lambda: self.log(f"No contact element found for {contact['name']} in search results"))
-                                        # Log page source snippet
                                         try:
-                                            search_area = self.driver.find_element(By.CSS_SELECTOR, ".scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']").get_attribute("outerHTML")[:500]
+                                            search_area = self.driver.find_element(By.CSS_SELECTOR, ".search-results-container, .scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']").get_attribute("outerHTML")[:500]
                                             self.root.after(0, lambda: self.log(f"Search area HTML: {search_area}"))
                                         except Exception:
                                             self.root.after(0, lambda: self.log(f"Failed to capture search area HTML at {self.driver.current_url} (Title: {self.driver.title})"))
                                         if attempt < max_retries - 1:
                                             self.root.after(0, lambda: self.log(f"Retrying search for {contact['name']}"))
                                             continue
-                                        # Fallback: Try profile page
                                         normalized_name = self.normalize_name(contact["name"])
                                         profile_url = f"https://www.linkedin.com/in/{normalized_name}/"
                                         self.root.after(0, lambda: self.log(f"Attempting profile page for {contact['name']}: {profile_url}"))
@@ -750,7 +758,6 @@ class LinkedInMessenger:
                                     break
                             if not contact_found:
                                 self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact after attempts"))
-                                # Force profile page fallback
                                 normalized_name = self.normalize_name(contact["name"])
                                 profile_url = f"https://www.linkedin.com/in/{normalized_name}/"
                                 self.root.after(0, lambda: self.log(f"Forcing profile page for {contact['name']}: {profile_url}"))
@@ -777,7 +784,6 @@ class LinkedInMessenger:
                                 self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact on profile page"))
                                 break
 
-                            # Try to find the Message button
                             try:
                                 if not self.check_page_state():
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before clicking message button"))
@@ -801,7 +807,6 @@ class LinkedInMessenger:
                                 self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to find or click message button: {error_msg}"))
                                 break
 
-                            # Send the message
                             first_name = contact["name"].split()[0]
                             formatted_message = message.format(
                                 first_name=first_name,
@@ -837,7 +842,6 @@ class LinkedInMessenger:
                                 self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to send message: {error_msg}"))
                                 break
 
-                            # Close the message window
                             try:
                                 if not self.check_page_state():
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before closing message window"))
@@ -861,7 +865,7 @@ class LinkedInMessenger:
 
                             self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
                             successful_sends += 1
-                            break  # Success, exit retry loop
+                            break
                         except Exception as e:
                             error_msg = str(e)
                             self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Unexpected error for {contact['name']} at {self.driver.current_url}: {error_msg}"))
