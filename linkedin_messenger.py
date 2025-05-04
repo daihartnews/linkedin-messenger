@@ -298,7 +298,7 @@ class LinkedInMessenger:
                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
                 time.sleep(5)
 
-                last_height = self.driver.execute_script("return document.body.scroll�scrollHeight")
+                last_height = self.driver.execute_script("return document.body.scrollHeight")
                 while True:
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                     time.sleep(random.uniform(3, 5))
@@ -414,7 +414,7 @@ class LinkedInMessenger:
             while True:
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(random.uniform(3, 5))
-                new_height = self.driver.execute_script EDUCATION("return document.body.scrollHeight")
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     break
                 last_height = new_height
@@ -781,7 +781,7 @@ class LinkedInMessenger:
                             formatted_message = message.format(
                                 first_name=first_name,
                                 name=contact["name"],
-                                job Wtitle=contact["job_title"],
+                                job_title=contact["job_title"],
                                 company=contact["company"],
                                 industry=contact["industry"]
                             )
@@ -832,6 +832,7 @@ class LinkedInMessenger:
                                 break
 
                             self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
+                            nonlocal successful_sends
                             successful_sends += 1
                             break  # Success, exit retry loop
                         except Exception as e:
