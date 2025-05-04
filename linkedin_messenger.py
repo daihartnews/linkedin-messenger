@@ -590,7 +590,6 @@ class LinkedInMessenger:
                 for i, contact in enumerate(selected_contacts):
                     max_retries = 2
                     contact_found = False
-                    redirected = False
                     for attempt in range(max_retries):
                         try:
                             self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Processing {contact['name']} at {self.driver.current_url}"))
@@ -608,10 +607,10 @@ class LinkedInMessenger:
                                     break
 
                             # Check if contact exists on connections page
-                            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card, div[class*='entity-result']")
+                            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card, .search-result__wrapper")
                             for elem in contact_elements:
                                 try:
-                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .entity-result__title-text, .t-16.t-black.t-bold")
+                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .name.actor-name, .t-16.t-black.t-bold")
                                     if name_elem.text.strip() == contact["name"]:
                                         contact["element"] = elem
                                         contact_found = True
@@ -645,8 +644,10 @@ class LinkedInMessenger:
                                             break
                                     if not search_input:
                                         raise TimeoutException("Search input not found after retries")
+                                    # Clear previous search
+                                    search_input.clear()
+                                    time.sleep(random.uniform(0.5, 1.0))
                                     # Simulate typing
-                                    time.sleep(random.uniform(2, 3))
                                     for char in contact["name"]:
                                         search_input.send_keys(char)
                                         time.sleep(random.uniform(0.1, 0.2))
@@ -654,31 +655,30 @@ class LinkedInMessenger:
                                     search_input.send_keys(Keys.RETURN)
                                     time.sleep(random.uniform(6, 10))
 
-                                    # Check if redirected to global search
-                                    if "search/results/all" in self.driver.current_url and not redirected:
-                                        self.root.after(0, lambda: self.log(f"Redirected to global search at {self.driver.current_url} (Title: {self.driver.title}), navigating back for {contact['name']}"))
-                                        self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-                                        time.sleep(random.uniform(6, 10))
-                                        redirected = True
-                                        if not self.check_page_state():
-                                            self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to reload connections page after redirection"))
-                                            break
-                                        continue
-
                                     # Check for search results container
                                     try:
                                         WebDriverWait(self.driver, 40).until(
-                                            EC.presence_of_element_located((By.CSS_SELECTOR, "section[class*='connections'], ul[class*='connections'], div[class*='search-results'], div[class*='entity-result']"))
+                                            EC.presence_of_element_located((By.CSS_SELECTOR, ".scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']"))
                                         )
                                         self.root.after(0, lambda: self.log(f"Search results container found for {contact['name']}"))
                                     except TimeoutException:
                                         self.root.after(0, lambda: self.log(f"No search results container found for {contact['name']}"))
 
-                                    contact_elements = self.driver.find_elements(By.CSS_SELECTOR, "li[class*='search-result'], li.reusable-search__result-container, .mn-connection-card, .connection-card, div[class*='entity-result']")
+                                    # Log all contact names found
+                                    contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".search-result__wrapper, li[class*='search-result'], li.reusable-search__result-container, .mn-connection-card, .connection-card")
+                                    found_names = []
+                                    for elem in contact_elements:
+                                        try:
+                                            name_elem = elem.find_element(By.CSS_SELECTOR, ".name.actor-name, .entity-result__title-text, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                            found_names.append(name_elem.text.strip())
+                                        except (NoSuchElementException, StaleElementReferenceException):
+                                            continue
+                                    self.root.after(0, lambda: self.log(f"Found {len(found_names)} contacts in search results: {', '.join(found_names)}"))
+
                                     contact_element = None
                                     for elem in contact_elements:
                                         try:
-                                            name_elem = elem.find_element(By.CSS_SELECTOR, ".entity-result__title-text, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                            name_elem = elem.find_element(By.CSS_SELECTOR, ".name.actor-name, .entity-result__title-text, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
                                             if name_elem.text.strip() == contact["name"]:
                                                 contact_element = elem
                                                 contact_found = True
@@ -690,7 +690,7 @@ class LinkedInMessenger:
                                         self.root.after(0, lambda: self.log(f"No contact element found for {contact['name']} in search results"))
                                         # Log page source snippet
                                         try:
-                                            search_area = self.driver.find_element(By.CSS_SELECTOR, "section[class*='connections'], ul[class*='connections'], div[class*='search-results'], div[class*='entity-result']").get_attribute("outerHTML")[:500]
+                                            search_area = self.driver.find_element(By.CSS_SELECTOR, ".scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']").get_attribute("outerHTML")[:500]
                                             self.root.after(0, lambda: self.log(f"Search area HTML: {search_area}"))
                                         except Exception:
                                             self.root.after(0, lambda: self.log(f"Failed to capture search area HTML at {self.driver.current_url} (Title: {self.driver.title})"))
@@ -749,7 +749,7 @@ class LinkedInMessenger:
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to search: {error_msg}"))
                                     break
                             if not contact_found:
-                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Contact not found after attempts, likely due to persistent redirection or absence in connections"))
+                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact after attempts"))
                                 # Force profile page fallback
                                 normalized_name = self.normalize_name(contact["name"])
                                 profile_url = f"https://www.linkedin.com/in/{normalized_name}/"
