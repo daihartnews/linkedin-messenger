@@ -601,7 +601,7 @@ class LinkedInMessenger:
                 # Ensure starting on connections page
                 self.root.after(0, lambda: self.log("Navigating to connections page"))
                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-                time.sleep(random.uniform(5, 8))
+                time.sleep(random.uniform(6, 10))
                 if not self.check_page_state():
                     self.root.after(0, lambda: self.log("Failed to load connections page. Aborting messaging."))
                     return
@@ -609,6 +609,7 @@ class LinkedInMessenger:
                 for i, contact in enumerate(selected_contacts):
                     max_retries = 2
                     contact_found = False
+                    redirected = False
                     for attempt in range(max_retries):
                         try:
                             self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Processing {contact['name']} at {self.driver.current_url}"))
@@ -620,16 +621,16 @@ class LinkedInMessenger:
                             if "mynetwork/invite-connect/connections" not in self.driver.current_url:
                                 self.root.after(0, lambda: self.log(f"Navigating to connections page for {contact['name']}"))
                                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-                                time.sleep(random.uniform(5, 8))
+                                time.sleep(random.uniform(6, 10))
                                 if not self.check_page_state():
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to load connections page"))
                                     break
 
                             # Check if contact exists on connections page
-                            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card")
+                            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mn-connection-card, .connection-card, div[class*='entity-result']")
                             for elem in contact_elements:
                                 try:
-                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".mn-connection-card__name, .connection-card__name, .entity-result__title-text, .t-16.t-black.t-bold")
                                     if name_elem.text.strip() == contact["name"]:
                                         contact["element"] = elem
                                         contact_found = True
@@ -647,37 +648,52 @@ class LinkedInMessenger:
                                     search_input = None
                                     for _ in range(2):  # Retry search input
                                         try:
-                                            search_input = WebDriverWait(self.driver, 30).until(
-                                                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search']"))
+                                            search_input = WebDriverWait(self.driver, 40).until(
+                                                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search'][type='text']"))
                                             )
-                                            self.root.after(0, lambda: self.log(f"Located search input for {contact['name']}"))
+                                            input_attrs = self.driver.execute_script("return {id: arguments[0].id, class: arguments[0].className, placeholder: arguments[0].placeholder};", search_input)
+                                            self.root.after(0, lambda: self.log(f"Located search input for {contact['name']}: id={input_attrs['id']}, class={input_attrs['class']}, placeholder={input_attrs['placeholder']}"))
                                             break
                                         except TimeoutException:
                                             self.root.after(0, lambda: self.log(f"CSS selector failed, trying XPath for search input"))
-                                            search_input = WebDriverWait(self.driver, 30).until(
-                                                EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Search')]"))
+                                            search_input = WebDriverWait(self.driver, 40).until(
+                                                EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Search') and @type='text']"))
                                             )
-                                            self.root.after(0, lambda: self.log(f"Located search input via XPath for {contact['name']}"))
+                                            input_attrs = self.driver.execute_script("return {id: arguments[0].id, class: arguments[0].className, placeholder: arguments[0].placeholder};", search_input)
+                                            self.root.after(0, lambda: self.log(f"Located search input via XPath for {contact['name']}: id={input_attrs['id']}, class={input_attrs['class']}, placeholder={input_attrs['placeholder']}"))
                                             break
                                     if not search_input:
                                         raise TimeoutException("Search input not found after retries")
-                                    search_input.clear()
-                                    normalized_name = self.normalize_name(contact["name"])
-                                    search_input.send_keys(contact["name"])
+                                    # Simulate typing
+                                    time.sleep(random.uniform(2, 3))
+                                    for char in contact["name"]:
+                                        search_input.send_keys(char)
+                                        time.sleep(random.uniform(0.1, 0.2))
+                                    time.sleep(random.uniform(2, 3))
                                     search_input.send_keys(Keys.RETURN)
-                                    time.sleep(random.uniform(5, 8))
+                                    time.sleep(random.uniform(6, 10))
 
                                     # Check if redirected to global search
-                                    if "search/results/all" in self.driver.current_url:
-                                        self.root.after(0, lambda: self.log(f"Redirected to global search, navigating back for {contact['name']}"))
+                                    if "search/results/all" in self.driver.current_url and not redirected:
+                                        self.root.after(0, lambda: self.log(f"Redirected to global search at {self.driver.current_url} (Title: {self.driver.title}), navigating back for {contact['name']}"))
                                         self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-                                        time.sleep(random.uniform(5, 8))
+                                        time.sleep(random.uniform(6, 10))
+                                        redirected = True
                                         if not self.check_page_state():
                                             self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to reload connections page after redirection"))
                                             break
                                         continue
 
-                                    contact_elements = self.driver.find_elements(By.CSS_SELECTOR, "li[class*='search-result'], li.reusable-search__result-container, .mn-connection-card, .connection-card")
+                                    # Check for search results container
+                                    try:
+                                        WebDriverWait(self.driver, 40).until(
+                                            EC.presence_of_element_located((By.CSS_SELECTOR, "section[class*='connections'], ul[class*='connections'], div[class*='search-results'], div[class*='entity-result']"))
+                                        )
+                                        self.root.after(0, lambda: self.log(f"Search results container found for {contact['name']}"))
+                                    except TimeoutException:
+                                        self.root.after(0, lambda: self.log(f"No search results container found for {contact['name']}"))
+
+                                    contact_elements = self.driver.find_elements(By.CSS_SELECTOR, "li[class*='search-result'], li.reusable-search__result-container, .mn-connection-card, .connection-card, div[class*='entity-result']")
                                     contact_element = None
                                     for elem in contact_elements:
                                         try:
@@ -685,204 +701,4 @@ class LinkedInMessenger:
                                             if name_elem.text.strip() == contact["name"]:
                                                 contact_element = elem
                                                 contact_found = True
-                                                self.root.after(0, lambda: self.log(f"Found {contact['name']} in search results"))
-                                                break
-                                        except StaleElementReferenceException:
-                                            continue
-                                    if not contact_element:
-                                        self.root.after(0, lambda: self.log(f"Retrying search for {contact['name']}"))
-                                        if attempt < max_retries - 1:
-                                            continue
-                                        # Log page source snippet
-                                        try:
-                                            search_area = self.driver.find_element(By.CSS_SELECTOR, "section[class*='connections'], ul[class*='connections'], div[class*='search-results']").get_attribute("outerHTML")[:500]
-                                            self.root.after(0, lambda: self.log(f"Search area HTML: {search_area}"))
-                                        except:
-                                            self.root.after(0, lambda: self.log(f"Failed to capture search area HTML at {self.driver.current_url} (Title: {self.driver.title})"))
-                                        # Fallback: Try profile page
-                                        profile_url = f"https://www.linkedin.com/in/{normalized_name}/"
-                                        self.root.after(0, lambda: self.log(f"Attempting profile page for {contact['name']}: {profile_url}"))
-                                        self.driver.get(profile_url)
-                                        time.sleep(random.uniform(5, 8))
-                                        if not self.check_page_state():
-                                            self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to load profile page"))
-                                            break
-                                        try:
-                                            name_elem = WebDriverWait(self.driver, 30).until(
-                                                EC.presence_of_element_located((By.CSS_SELECTOR, "h1.text-heading-xlarge"))
-                                            )
-                                            if name_elem.text.strip() == contact["name"]:
-                                                contact_element = self.driver.find_element(By.CSS_SELECTOR, "main")
-                                                contact_found = True
-                                                self.root.after(0, lambda: self.log(f"Verified {contact['name']} on profile page"))
-                                            else:
-                                                self.root.after(0, lambda: self.log(f"Profile page name mismatch for {contact['name']}"))
-                                                break
-                                        except Exception as e:
-                                            self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not verify profile page: {str(e)}"))
-                                            break
-                                    if not contact_found:
-                                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not find contact on LinkedIn after search"))
-                                        break
-                                except TimeoutException:
-                                    self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Search input not found for {contact['name']}"))
-                                    if attempt < max_retries - 1:
-                                        self.driver.refresh()
-                                        time.sleep(random.uniform(2, 4))
-                                        continue
-                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Search input not found after retries"))
-                                    break
-                                except ElementNotInteractableException:
-                                    self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Search input not interactable for {contact['name']}"))
-                                    if attempt < max_retries - 1:
-                                        self.driver.refresh()
-                                        time.sleep(random.uniform(2, 4))
-                                        continue
-                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Search input not interactable after retries"))
-                                    break
-                                except Exception as e:
-                                    error_msg = str(e)
-                                    self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to search for {contact['name']}: {error_msg}"))
-                                    if attempt < max_retries - 1:
-                                        self.driver.refresh()
-                                        time.sleep(random.uniform(2, 4))
-                                        continue
-                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to search: {error_msg}"))
-                                    break
-                            if not contact_found:
-                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Contact not found after attempts"))
-                                continue
-
-                            # Try to find the Message button
-                            try:
-                                if not self.check_page_state():
-                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before clicking message button"))
-                                    break
-                                self.root.after(0, lambda: self.log(f"Locating message button for {contact['name']}"))
-                                message_button = WebDriverWait(self.driver, 30).until(
-                                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message') or contains(@class, 'msg') or @data-control-name='message']"))
-                                )
-                                self.driver.execute_script("arguments[0].scrollIntoView(true);", message_button)
-                                time.sleep(random.uniform(0.5, 1.0))
-                                message_button.click()
-                                self.root.after(0, lambda: self.log(f"Clicked message button for {contact['name']}"))
-                                time.sleep(random.uniform(2, 3))
-                            except Exception as e:
-                                error_msg = str(e)
-                                self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to find or click message button for {contact['name']}: {error_msg}"))
-                                if attempt < max_retries - 1:
-                                    self.driver.refresh()
-                                    time.sleep(random.uniform(2, 4))
-                                    continue
-                                # Fallback: Navigate to profile page if not already there
-                                if "in/" not in self.driver.current_url:
-                                    profile_url = f"https://www.linkedin.com/in/{normalized_name}/"
-                                    self.root.after(0, lambda: self.log(f"Attempting profile page for {contact['name']}: {profile_url}"))
-                                    self.driver.get(profile_url)
-                                    time.sleep(random.uniform(5, 8))
-                                    if not self.check_page_state():
-                                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to load profile page"))
-                                        break
-                                    try:
-                                        message_button = WebDriverWait(self.driver, 30).until(
-                                            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Message') or contains(@aria-label, 'Message') or contains(@class, 'msg') or @data-control-name='message']"))
-                                        )
-                                        self.driver.execute_script("arguments[0].scrollIntoView(true);", message_button)
-                                        time.sleep(random.uniform(0.5, 1.0))
-                                        message_button.click()
-                                        self.root.after(0, lambda: self.log(f"Clicked message button on profile page for {contact['name']}"))
-                                        time.sleep(random.uniform(2, 3))
-                                    except Exception as e:
-                                        error_msg = str(e)
-                                        self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to find or click message button on profile page: {error_msg}"))
-                                        break
-
-                            # Send the message
-                            first_name = contact["name"].split()[0]
-                            formatted_message = message.format(
-                                first_name=first_name,
-                                name=contact["name"],
-                                job_title=contact["job_title"],
-                                company=contact["company"],
-                                industry=contact["industry"]
-                            )
-                            try:
-                                if not self.check_page_state():
-                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before sending message"))
-                                    break
-                                self.root.after(0, lambda: self.log(f"Filling message input for {contact['name']}"))
-                                message_input = WebDriverWait(self.driver, 30).until(
-                                    EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable"))
-                                )
-                                message_input.send_keys(formatted_message)
-                                self.root.after(0, lambda: self.log(f"Message input filled for {contact['name']}"))
-                                time.sleep(random.uniform(0.5, 1.5))
-                                send_button = WebDriverWait(self.driver, 30).until(
-                                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".msg-form__send-button"))
-                                )
-                                send_button.click()
-                                self.root.after(0, lambda: self.log(f"Clicked send button for {contact['name']}"))
-                                time.sleep(random.uniform(2, 3))
-                            except Exception as e:
-                                error_msg = str(e)
-                                self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to send message to {contact['name']}: {error_msg}"))
-                                if attempt < max_retries - 1:
-                                    self.driver.refresh()
-                                    time.sleep(random.uniform(2, 4))
-                                    continue
-                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to send message: {error_msg}"))
-                                break
-
-                            # Close the message window
-                            try:
-                                if not self.check_page_state():
-                                    self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Page state invalid before closing message window"))
-                                    break
-                                self.root.after(0, lambda: self.log(f"Closing message window for {contact['name']}"))
-                                close_button = WebDriverWait(self.driver, 30).until(
-                                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Close your conversation'], button[aria-label*='Dismiss']"))
-                                )
-                                close_button.click()
-                                self.root.after(0, lambda: self.log(f"Closed message window for {contact['name']}"))
-                                time.sleep(random.uniform(0.5, 1.5))
-                            except Exception as e:
-                                error_msg = str(e)
-                                self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Failed to close message window for {contact['name']}: {error_msg}"))
-                                if attempt < max_retries - 1:
-                                    self.driver.refresh()
-                                    time.sleep(random.uniform(2, 4))
-                                    continue
-                                self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Failed to close message window: {error_msg}"))
-                                break
-
-                            self.root.after(0, lambda: self.log(f"Sent message to {contact['name']}"))
-                            successful_sends += 1
-                            break  # Success, exit retry loop
-                        except Exception as e:
-                            error_msg = str(e)
-                            self.root.after(0, lambda: self.log(f"Attempt {attempt + 1}/{max_retries}: Unexpected error for {contact['name']} at {self.driver.current_url}: {error_msg}"))
-                            if attempt < max_retries - 1:
-                                self.driver.refresh()
-                                time.sleep(random.uniform(2, 4))
-                                continue
-                            self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Unexpected error after retries: {error_msg}"))
-                            break
-                    self.root.after(0, lambda: setattr(self.send_progress, "value", i + 1))
-                    self.root.update()
-                self.root.after(0, lambda: self.log(f"Messages sent successfully to {successful_sends} contacts"))
-            except Exception as e:
-                self.root.after(0, lambda: self.log(f"Error sending messages: {str(e)}"))
-            finally:
-                self.root.after(0, lambda: self.log(f"Messaging process completed. Sent {successful_sends} messages, skipped {len(selected_contacts) - successful_sends} contacts"))
-                self.root.after(0, lambda: setattr(self.send_progress, "value", 0))
-
-        threading.Thread(target=send, daemon=True).start()
-
-    def __del__(self):
-        if self.driver:
-            self.driver.quit()
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = LinkedInMessenger(root)
-    root.mainloop()
+                                                self.root.after(0, lambda
