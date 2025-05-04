@@ -515,7 +515,7 @@ class LinkedInMessenger:
         self.selected_text.delete("1.0", tk.END)
         selected_contacts = [c for c in self.contacts if c["selected"]]
 
-        if selected_contacts:
+        if selectedContacts:
             self.selected_text.insert(tk.END, "Selected Contacts:\n")
             for contact in selected_contacts:
                 self.selected_text.insert(tk.END, f"- {contact['name']}\n")
@@ -645,61 +645,105 @@ class LinkedInMessenger:
                                         search_input.send_keys(char)
                                         time.sleep(random.uniform(0.1, 0.2))
                                     time.sleep(random.uniform(2, 3))
-                                    search_input.send_keys(Keys.RETURN)
+                                    # Avoid triggering global search
+                                    self.driver.execute_script("arguments[0].dispatchEvent(new Event('input'))", search_input)
                                     time.sleep(random.uniform(6, 10))
 
-                                    try:
-                                        # Check for iframe and switch to it
-                                        try:
-                                            WebDriverWait(self.driver, 5).until(
-                                                EC.frame_to_be_available_and_switch_to_it((By.TAG_NAME, "iframe"))
-                                            )
-                                            self.root.after(0, lambda: self.log(f"Switched to iframe for {contact['name']}"))
-                                        except TimeoutException:
-                                            self.root.after(0, lambda: self.log(f"No iframe found for {contact['name']}, continuing in default content"))
-                                            self.driver.switch_to.default_content()
-
-                                        # Wait for search results container
-                                        WebDriverWait(self.driver, 40).until(
-                                            EC.presence_of_element_located((
-                                                By.CSS_SELECTOR, 
-                                                ".search-results-container, .scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']"
-                                            ))
-                                        )
-                                        self.root.after(0, lambda: self.log(f"Search results container found for {contact['name']}"))
-                                    except TimeoutException:
-                                        self.root.after(0, lambda: self.log(f"No search results container found for {contact['name']}"))
-
-                                    contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".search-result__wrapper, li[class*='search-result'], li.reusable-search__result-container, .mn-connection-card, .connection-card")
-                                    found_names = []
-                                    for elem in contact_elements:
-                                        try:
-                                            name_elem = elem.find_element(By.CSS_SELECTOR, ".name.actor-name, .entity-result__title-text, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                                            found_names.append(name_elem.text.strip())
-                                        except (NoSuchElementException, StaleElementReferenceException):
-                                            continue
-                                    self.root.after(0, lambda: self.log(f"Found {len(found_names)} contacts in search results: {', '.join(found_names)}"))
-
+                                    # Check for iframes
+                                    iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
                                     contact_element = None
-                                    for elem in contact_elements:
+                                    found_in_iframe = False
+                                    for iframe_index, iframe in enumerate(iframes):
                                         try:
-                                            name_elem = elem.find_element(By.CSS_SELECTOR, ".name.actor-name, .entity-result__title-text, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
-                                            if name_elem.text.strip() == contact["name"]:
-                                                contact_element = elem
-                                                contact_found = True
-                                                self.root.after(0, lambda: self.log(f"Found {contact['name']} in search results"))
+                                            iframe_attrs = self.driver.execute_script("return {id: arguments[0].id, class: arguments[0].className, src: arguments[0].src};", iframe)
+                                            self.root.after(0, lambda: self.log(f"Trying iframe {iframe_index + 1}/{len(iframes)} for {contact['name']}: id={iframe_attrs['id']}, class={iframe_attrs['class']}, src={iframe_attrs['src']}"))
+                                            WebDriverWait(self.driver, 5).until(
+                                                EC.frame_to_be_available_and_switch_to_it(iframe)
+                                            )
+                                            self.root.after(0, lambda: self.log(f"Switched to iframe {iframe_index + 1} for {contact['name']}"))
+
+                                            try:
+                                                WebDriverWait(self.driver, 10).until(
+                                                    EC.presence_of_element_located((
+                                                        By.CSS_SELECTOR, 
+                                                        ".search-results-container, .scaffold-layout__list-container, ul[class*='list-style-none'], div[class*='search-results']"
+                                                    ))
+                                                )
+                                                self.root.after(0, lambda: self.log(f"Search results container found in iframe {iframe_index + 1} for {contact['name']}"))
+                                            except TimeoutException:
+                                                self.root.after(0, lambda: self.log(f"No search results container in iframe {iframe_index + 1} for {contact['name']}"))
+                                                self.driver.switch_to.default_content()
+                                                continue
+
+                                            contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".reusable-search__result-container, .search-result__wrapper, li[class*='search-result'], .mn-connection-card, .connection-card")
+                                            found_names = []
+                                            for elem in contact_elements:
+                                                try:
+                                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".entity-result__title-text, .name.actor-name, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                                    found_names.append(name_elem.text.strip())
+                                                except (NoSuchElementException, StaleElementReferenceException):
+                                                    continue
+                                            self.root.after(0, lambda: self.log(f"Found {len(found_names)} contacts in iframe {iframe_index + 1} for {contact['name']}: {', '.join(found_names)}"))
+
+                                            for elem in contact_elements:
+                                                try:
+                                                    name_elem = elem.find_element(By.CSS_SELECTOR, ".entity-result__title-text, .name.actor-name, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                                    if name_elem.text.strip() == contact["name"]:
+                                                        contact_element = elem
+                                                        contact_found = True
+                                                        found_in_iframe = True
+                                                        self.root.after(0, lambda: self.log(f"Found {contact['name']} in search results in iframe {iframe_index + 1}"))
+                                                        break
+                                                except StaleElementReferenceException:
+                                                    continue
+                                            self.driver.switch_to.default_content()
+                                            self.root.after(0, lambda: self.log(f"Switched back to default content after iframe {iframe_index + 1} for {contact['name']}"))
+                                            if contact_found:
                                                 break
-                                        except StaleElementReferenceException:
+                                        except TimeoutException:
+                                            self.root.after(0, lambda: self.log(f"Failed to switch to iframe {iframe_index + 1} for {contact['name']}"))
+                                            self.driver.switch_to.default_content()
                                             continue
-                                    
-                                    # Switch back to default content
-                                    self.driver.switch_to.default_content()
-                                    self.root.after(0, lambda: self.log(f"Switched back to default content for {contact['name']}"))
+
+                                    # Try main document if no contact found in iframes
+                                    if not found_in_iframe:
+                                        self.root.after(0, lambda: self.log(f"No contact found in iframes, trying main document for {contact['name']}"))
+                                        try:
+                                            WebDriverWait(self.driver, 10).until(
+                                                EC.presence_of_element_located((
+                                                    By.CSS_SELECTOR, 
+                                                    ".search-results-container, .scaffold-layout__list-container, ul[class*='list-style-none'], div[class*='search-results']"
+                                                ))
+                                            )
+                                            self.root.after(0, lambda: self.log(f"Search results container found in main document for {contact['name']}"))
+                                        except TimeoutException:
+                                            self.root.after(0, lambda: self.log(f"No search results container found in main document for {contact['name']}"))
+
+                                        contact_elements = self.driver.find_elements(By.CSS_SELECTOR, ".reusable-search__result-container, .search-result__wrapper, li[class*='search-result'], .mn-connection-card, .connection-card")
+                                        found_names = []
+                                        for elem in contact_elements:
+                                            try:
+                                                name_elem = elem.find_element(By.CSS_SELECTOR, ".entity-result__title-text, .name.actor-name, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                                found_names.append(name_elem.text.strip())
+                                            except (NoSuchElementException, StaleElementReferenceException):
+                                                continue
+                                        self.root.after(0, lambda: self.log(f"Found {len(found_names)} contacts in main document for {contact['name']}: {', '.join(found_names)}"))
+
+                                        for elem in contact_elements:
+                                            try:
+                                                name_elem = elem.find_element(By.CSS_SELECTOR, ".entity-result__title-text, .name.actor-name, .mn-connection-card__name, .connection-card__name, .t-16.t-black.t-bold")
+                                                if name_elem.text.strip() == contact["name"]:
+                                                    contact_element = elem
+                                                    contact_found = True
+                                                    self.root.after(0, lambda: self.log(f"Found {contact['name']} in search results in main document"))
+                                                    break
+                                            except StaleElementReferenceException:
+                                                continue
 
                                     if not contact_element:
                                         self.root.after(0, lambda: self.log(f"No contact element found for {contact['name']} in search results"))
                                         try:
-                                            search_area = self.driver.find_element(By.CSS_SELECTOR, ".search-results-container, .scaffold-layout__list-container, section[class*='connections'], ul[class*='connections'], div[class*='search-results']").get_attribute("outerHTML")[:500]
+                                            search_area = self.driver.find_element(By.CSS_SELECTOR, ".search-results-container, .scaffold-layout__list-container, ul[class*='list-style-none'], div[class*='search-results']").get_attribute("outerHTML")[:1000]
                                             self.root.after(0, lambda: self.log(f"Search area HTML: {search_area}"))
                                         except Exception:
                                             self.root.after(0, lambda: self.log(f"Failed to capture search area HTML at {self.driver.current_url} (Title: {self.driver.title})"))
@@ -718,12 +762,18 @@ class LinkedInMessenger:
                                             name_elem = WebDriverWait(self.driver, 40).until(
                                                 EC.presence_of_element_located((By.CSS_SELECTOR, "h1.text-heading-xlarge"))
                                             )
-                                            if name_elem.text.strip() == contact["name"]:
+                                            profile_name = name_elem.text.strip()
+                                            if profile_name == contact["name"]:
                                                 contact_element = self.driver.find_element(By.CSS_SELECTOR, "main")
                                                 contact_found = True
                                                 self.root.after(0, lambda: self.log(f"Verified {contact['name']} on profile page"))
                                             else:
-                                                self.root.after(0, lambda: self.log(f"Profile page name mismatch for {contact['name']}: Found '{name_elem.text.strip()}'"))
+                                                self.root.after(0, lambda: self.log(f"Profile page name mismatch for {contact['name']}: Found '{profile_name}'"))
+                                                try:
+                                                    profile_html = self.driver.find_element(By.CSS_SELECTOR, "body").get_attribute("outerHTML")[:1000]
+                                                    self.root.after(0, lambda: self.log(f"Profile page HTML: {profile_html}"))
+                                                except Exception:
+                                                    self.root.after(0, lambda: self.log(f"Failed to capture profile page HTML"))
                                                 break
                                         except Exception as e:
                                             self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not verify profile page: {str(e)}"))
@@ -770,12 +820,18 @@ class LinkedInMessenger:
                                     name_elem = WebDriverWait(self.driver, 40).until(
                                         EC.presence_of_element_located((By.CSS_SELECTOR, "h1.text-heading-xlarge"))
                                     )
-                                    if name_elem.text.strip() == contact["name"]:
+                                    profile_name = name_elem.text.strip()
+                                    if profile_name == contact["name"]:
                                         contact_element = self.driver.find_element(By.CSS_SELECTOR, "main")
                                         contact_found = True
                                         self.root.after(0, lambda: self.log(f"Verified {contact['name']} on profile page"))
                                     else:
-                                        self.root.after(0, lambda: self.log(f"Profile page name mismatch for {contact['name']}: Found '{name_elem.text.strip()}'"))
+                                        self.root.after(0, lambda: self.log(f"Profile page name mismatch for {contact['name']}: Found '{profile_name}'"))
+                                        try:
+                                            profile_html = self.driver.find_element(By.CSS_SELECTOR, "body").get_attribute("outerHTML")[:1000]
+                                            self.root.after(0, lambda: self.log(f"Profile page HTML: {profile_html}"))
+                                        except Exception:
+                                            self.root.after(0, lambda: self.log(f"Failed to capture profile page HTML"))
                                         break
                                 except Exception as e:
                                     self.root.after(0, lambda: self.log(f"Skipping {contact['name']}: Could not verify profile page: {str(e)}"))
