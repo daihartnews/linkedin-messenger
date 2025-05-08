@@ -6,6 +6,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 import random
@@ -635,8 +636,10 @@ class LinkedInMessenger:
                             self.log(f"Skipping {contact['name']}: Contact not found in search results")
                             continue
 
-                        # Scroll to contact element
+                        # Scroll and hover to contact element
                         self.driver.execute_script("arguments[0].scrollIntoView(true);", contact_element)
+                        time.sleep(random.uniform(0.3, 0.6))
+                        ActionChains(self.driver).move_to_element(contact_element).perform()
                         time.sleep(random.uniform(0.3, 0.6))
 
                         # Debug: Log all buttons in contact element
@@ -644,32 +647,92 @@ class LinkedInMessenger:
                         button_texts = [(btn.text.strip(), btn.get_attribute("aria-label") or "", btn.get_attribute("data-control-name") or "") for btn in buttons]
                         self.log(f"Buttons in contact element for {contact['name']}: {button_texts}")
 
-                        # Try finding message button within contact element
+                        # Try multiple selectors for message button
                         message_button = None
-                        try:
-                            message_button = WebDriverWait(contact_element, 30).until(
-                                EC.visibility_of_element_located((By.CSS_SELECTOR, "button[class*='message'], button[aria-label*='message' i], [data-control-name*='message'], button[class*='msg']"))
-                            )
-                            WebDriverWait(contact_element, 30).until(
-                                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='message'], button[aria-label*='message' i], [data-control-name*='message'], button[class*='msg']"))
-                            )
-                            self.log(f"Found message button in contact element for {contact['name']}")
-                        except (TimeoutException, NoSuchElementException):
-                            self.log(f"Message button not found in contact element for {contact['name']}, trying page-wide search")
+                        successful_selectors = []
+                        failed_selectors = []
 
-                        # Fallback: Search page-wide for message button
-                        if not message_button:
+                        # Define selector strategies
+                        selectors = [
+                            # CSS Selectors (contact element)
+                            {"selector": "button[class*='message']", "context": "contact element", "type": "css"},
+                            {"selector": "button[aria-label*='message' i]", "context": "contact element", "type": "css"},
+                            {"selector": "[data-control-name*='message']", "context": "contact element", "type": "css"},
+                            {"selector": "button[class*='msg']", "context": "contact element", "type": "css"},
+                            {"selector": "button[class*='artdeco-button']", "context": "contact element", "type": "css"},
+                            {"selector": "button[class*='secondary']", "context": "contact element", "type": "css"},
+                            # XPath Selectors (contact element)
+                            {"selector": ".//button[contains(text(), 'Message')]", "context": "contact element", "type": "xpath"},
+                            {"selector": ".//button[contains(@aria-label, 'Message')]", "context": "contact element", "type": "xpath"},
+                            {"selector": ".//button[@data-control-name='message']", "context": "contact element", "type": "xpath"},
+                            # CSS Selectors (page-wide)
+                            {"selector": f"button[aria-label*='{contact['name']}' i][aria-label*='message' i]", "context": "page-wide", "type": "css"},
+                            {"selector": "button[class*='message']", "context": "page-wide", "type": "css"},
+                            {"selector": "button[aria-label*='message' i]", "context": "page-wide", "type": "css"},
+                            {"selector": "[data-control-name*='message']", "context": "page-wide", "type": "css"},
+                            {"selector": "button[class*='msg']", "context": "page-wide", "type": "css"},
+                            {"selector": "button[class*='artdeco-button']", "context": "page-wide", "type": "css"},
+                            {"selector": "button[class*='secondary']", "context": "page-wide", "type": "css"},
+                            # XPath Selectors (page-wide)
+                            {"selector": "//button[contains(text(), 'Message')]", "context": "page-wide", "type": "xpath"},
+                            {"selector": "//button[contains(@aria-label, 'Message')]", "context": "page-wide", "type": "xpath"},
+                            {"selector": "//button[@data-control-name='message']", "context": "page-wide", "type": "xpath"}
+                        ]
+
+                        # Try each selector
+                        for sel in selectors:
                             try:
-                                message_button = WebDriverWait(self.driver, 30).until(
-                                    EC.visibility_of_element_located((By.CSS_SELECTOR, f"button[aria-label*='{contact['name']}' i][aria-label*='message' i], button[class*='message'], [data-control-name*='message'], button[class*='msg']"))
+                                parent = contact_element if sel["context"] == "contact element" else self.driver
+                                by_type = By.CSS_SELECTOR if sel["type"] == "css" else By.XPATH
+                                button = WebDriverWait(parent, 10).until(
+                                    EC.visibility_of_element_located((by_type, sel["selector"]))
                                 )
-                                WebDriverWait(self.driver, 30).until(
-                                    EC.element_to_be_clickable((By.CSS_SELECTOR, f"button[aria-label*='{contact['name']}' i][aria-label*='message' i], button[class*='message'], [data-control-name*='message'], button[class*='msg']"))
+                                WebDriverWait(parent, 10).until(
+                                    EC.element_to_be_clickable((by_type, sel["selector"]))
                                 )
-                                self.log(f"Found message button page-wide for {contact['name']}")
-                            except (TimeoutException, NoSuchElementException):
-                                self.log(f"Skipping {contact['name']}: Message button not found")
+                                self.log(f"Found message button for {contact['name']} with selector '{sel['selector']}' in {sel['context']}")
+                                successful_selectors.append(f"{sel['selector']} ({sel['context']})")
+                                if not message_button:  # Use the first successful button
+                                    message_button = button
+                            except (TimeoutException, NoSuchElementException) as e:
+                                self.log(f"Failed to find message button for {contact['name']} with selector '{sel['selector']}' in {sel['context']}: {str(e)}")
+                                failed_selectors.append(f"{sel['selector']} ({sel['context']})")
                                 continue
+
+                        # Try profile navigation approach
+                        try:
+                            self.log(f"Trying profile navigation for {contact['name']}")
+                            name_link = contact_element.find_element(By.CSS_SELECTOR, "a[href*='/in/'], a[class*='app-aware-link'], a[class*='entity']")
+                            self.driver.execute_script("arguments[0].scrollIntoView(true);", name_link)
+                            time.sleep(random.uniform(0.3, 0.6))
+                            name_link.click()
+                            time.sleep(random.uniform(3, 5))
+                            if not self.check_page_state():
+                                self.log(f"Skipping profile navigation for {contact['name']}: Invalid page state")
+                                raise TimeoutException("Invalid page state")
+                            message_button_profile = WebDriverWait(self.driver, 10).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='message'], button[aria-label*='message' i], [data-control-name*='message'], button[class*='msg'], button[class*='artdeco-button']"))
+                            )
+                            self.log(f"Found message button for {contact['name']} via profile navigation")
+                            successful_selectors.append("profile navigation")
+                            if not message_button:  # Use profile button if no prior success
+                                message_button = message_button_profile
+                            # Navigate back to connections page
+                            self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                            time.sleep(random.uniform(3, 5))
+                        except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e:
+                            self.log(f"Failed profile navigation for {contact['name']}: {str(e)}")
+                            failed_selectors.append("profile navigation")
+                            # Navigate back to connections page
+                            self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                            time.sleep(random.uniform(3, 5))
+
+                        # Summarize selector results
+                        self.log(f"Selector summary for {contact['name']}: Successful: {successful_selectors}; Failed: {failed_selectors}")
+
+                        if not message_button:
+                            self.log(f"Skipping {contact['name']}: No message button found with any selector")
+                            continue
 
                         # Click message button
                         self.driver.execute_script("arguments[0].scrollIntoView(true);", message_button)
