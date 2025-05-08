@@ -288,7 +288,7 @@ class LinkedInMessenger:
                         Object.defineProperty(navigator, 'languages', {
                             get: () => ['en-US', 'en']
                         });
-                        window.chrome = window.chrome || {};
+                        window.chrome = window.chrome | {};
                         window.chrome.runtime = {};
                     """
                 })
@@ -573,20 +573,22 @@ class LinkedInMessenger:
 
     def check_page_state(self):
         try:
+            self.log("Checking page state")
             # Wait for basic HTML to load
-            WebDriverWait(self.driver, 20).until(
+            WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             self.log("Page body loaded")
 
             # Check JavaScript readiness
             try:
-                WebDriverWait(self.driver, 20).until(
+                WebDriverWait(self.driver, 10).until(
                     lambda d: d.execute_script("return document.readyState") == "complete"
                 )
                 self.log("Page JavaScript completed")
             except TimeoutException:
-                self.log("Warning: Page JavaScript did not complete, proceeding anyway")
+                self.log("Warning: Page JavaScript did not complete, forcing load")
+                self.driver.execute_script("window.stop();")  # Force stop loading
                 # Save HTML for debugging
                 try:
                     html_snippet = self.driver.page_source[:1000]
@@ -670,25 +672,70 @@ class LinkedInMessenger:
         def send():
             nonlocal successful_sends
             try:
-                self.log("Navigating to connections page")
+                self.log("Starting message sending process")
                 self.log_system_stats()
+                # Save initial screenshot
+                try:
+                    screenshot_path = f"screenshot_pre_nav_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    self.log(f"Saved pre-navigation screenshot: {screenshot_path}")
+                except Exception as e:
+                    self.log(f"Failed to save pre-navigation screenshot: {str(e)}")
+
+                # Pre-navigation refresh
+                self.log("Refreshing browser before navigation")
+                self.driver.refresh()
+                time.sleep(random.uniform(2, 4))
+
+                # Try connections page with retries
+                self.log("Attempting to navigate to connections page")
                 self.driver.set_page_load_timeout(30)
-                for attempt in range(2):  # Retry navigation twice
+                primary_url = "https://www.linkedin.com/mynetwork/invite-connect/connections/"
+                fallback_url = "https://www.linkedin.com/messaging/"
+                navigation_success = False
+
+                for attempt in range(3):  # Increased to 3 retries
                     try:
-                        self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                        self.log(f"Navigation attempt {attempt + 1}/3 to {primary_url}")
+                        self.driver.get(primary_url)
                         time.sleep(random.uniform(5, 7))
+                        navigation_success = True
                         break
                     except TimeoutException as e:
-                        self.log(f"Navigation timeout (attempt {attempt + 1}/2): {str(e)}")
-                        if attempt == 1:
-                            self.log("Failed to load connections page after retries. Aborting.")
-                            return
-                        self.log("Retrying navigation after refresh")
-                        self.driver.refresh()
-                        time.sleep(random.uniform(5, 7))
+                        self.log(f"Navigation timeout (attempt {attempt + 1}/3): {str(e)}")
+                        if attempt < 2:
+                            self.log("Retrying navigation after refresh")
+                            self.driver.refresh()
+                            time.sleep(random.uniform(5, 7))
+                        continue
 
+                # Try fallback URL if primary fails
+                if not navigation_success:
+                    self.log(f"Primary navigation failed, attempting fallback: {fallback_url}")
+                    for attempt in range(2):
+                        try:
+                            self.log(f"Fallback navigation attempt {attempt + 1}/2 to {fallback_url}")
+                            self.driver.get(fallback_url)
+                            time.sleep(random.uniform(5, 7))
+                            navigation_success = True
+                            break
+                        except TimeoutException as e:
+                            self.log(f"Fallback navigation timeout (attempt {attempt + 1}/2): {str(e)}")
+                            if attempt == 0:
+                                self.log("Retrying fallback navigation after refresh")
+                                self.driver.refresh()
+                                time.sleep(random.uniform(5, 7))
+                            continue
+
+                if not navigation_success:
+                    self.log("All navigation attempts failed. Aborting.")
+                    self.root.after(0, lambda: messagebox.showerror("Error", "Failed to load LinkedIn page. Check network or LinkedIn status."))
+                    return
+
+                self.log("Checking page state after navigation")
                 if not self.check_page_state():
-                    self.log("Failed to load connections page. Aborting.")
+                    self.log("Failed to load valid page state. Aborting.")
+                    self.root.after(0, lambda: messagebox.showerror("Error", "Invalid page state. Check for CAPTCHAs or restrictions."))
                     return
 
                 for i, contact in enumerate(selected_contacts):
@@ -737,7 +784,7 @@ class LinkedInMessenger:
                                     """
                                 })
                                 self.driver.set_page_load_timeout(30)
-                                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                                self.driver.get(primary_url)
                                 time.sleep(random.uniform(5, 7))
                                 if not self.check_page_state():
                                     self.log(f"Skipping {contact['name']}: Failed to reload connections page after reinitialization")
@@ -761,7 +808,7 @@ class LinkedInMessenger:
                                     search_input = None
                                     for by_type, selector in selectors:
                                         try:
-                                            search_input = WebDriverWait(self.driver, 45).until(
+                                            search_input = WebDriverWait(self.driver, 10).until(
                                                 EC.presence_of_element_located((by_type, selector))
                                             )
                                             self.log(f"Search input found for {contact['name']} with {by_type}: {selector}")
@@ -790,7 +837,7 @@ class LinkedInMessenger:
                                     # Handle potential redirection
                                     if "search/results/all" in self.driver.current_url:
                                         self.log(f"Redirected to global search, navigating back for {contact['name']}")
-                                        self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                                        self.driver.get(primary_url)
                                         time.sleep(random.uniform(5, 7))
                                         if not self.check_page_state():
                                             self.log(f"Skipping {contact['name']}: Failed to reload connections page")
@@ -799,7 +846,7 @@ class LinkedInMessenger:
 
                                     # Wait for search results
                                     try:
-                                        results_container = WebDriverWait(self.driver, 30).until(
+                                        results_container = WebDriverWait(self.driver, 10).until(
                                             EC.presence_of_element_located((By.CSS_SELECTOR, "ul[class*='connections'], div[class*='search-results'], div[class*='entity-result']"))
                                         )
                                         self.log(f"Search results container found for {contact['name']}")
@@ -951,13 +998,13 @@ class LinkedInMessenger:
                                 if not message_button:  # Use profile button if no prior success
                                     message_button = message_button_profile
                                 # Navigate back to connections page
-                                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                                self.driver.get(primary_url)
                                 time.sleep(random.uniform(5, 7))
                             except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e:
                                 self.log(f"Failed profile navigation for {contact['name']}: {str(e)}")
                                 failed_selectors.append("profile navigation")
                                 # Navigate back to connections page
-                                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                                self.driver.get(primary_url)
                                 time.sleep(random.uniform(5, 7))
 
                             # Summarize selector results
@@ -983,12 +1030,12 @@ class LinkedInMessenger:
                                 company=contact["company"],
                                 industry=contact["industry"]
                             )
-                            message_input = WebDriverWait(self.driver, 20).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable"))
+                            message_input = WebDriverWait(self.driver, 10).until(
+                               'incontroleditable"))
                             )
                             message_input.send_keys(formatted_message)
                             time.sleep(random.uniform(0.3, 0.6))
-                            send_button = WebDriverWait(self.driver, 20).until(
+                            send_button = WebDriverWait(self.driver, 10).until(
                                 EC.element_to_be_clickable((By.CSS_SELECTOR, ".msg-form__send-button"))
                             )
                             ActionChains(self.driver).move_to_element(send_button).click().perform()
@@ -996,7 +1043,7 @@ class LinkedInMessenger:
                             time.sleep(random.uniform(1, 2))
 
                             # Close message window
-                            close_button = WebDriverWait(self.driver, 20).until(
+                            close_button = WebDriverWait(self.driver, 10).until(
                                 EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Close your conversation'], button[aria-label*='Dismiss']"))
                             )
                             ActionChains(self.driver).move_to_element(close_button).click().perform()
@@ -1045,14 +1092,22 @@ class LinkedInMessenger:
                 self.log(f"Messaging completed. Sent {successful_sends} messages, skipped {len(selected_contacts) - successful_sends} contacts")
                 self.send_progress["value"] = 0
 
-        # Run in a thread with error handling
+        # Run in a thread with error handling and timeout
         try:
+            self.log("Starting send_messages thread")
             thread = threading.Thread(target=send, daemon=True)
             thread.start()
             thread.join(timeout=300)  # 5-minute timeout
             if thread.is_alive():
                 self.log("Messaging thread timed out after 5 minutes")
                 self.root.after(0, lambda: messagebox.showerror("Error", "Messaging operation timed out. Please restart the application."))
+                # Attempt to clean up
+                try:
+                    self.driver.quit()
+                    self.driver = None
+                    self.log("Closed browser due to timeout")
+                except Exception as e:
+                    self.log(f"Failed to close browser after timeout: {str(e)}")
         except Exception as e:
             self.log(f"Threading error in send_messages: {str(e)}")
             self.root.after(0, lambda: messagebox.showerror("Error", f"Threading error: {str(e)}"))
