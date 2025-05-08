@@ -640,15 +640,46 @@ class LinkedInMessenger:
                                     self.log(f"Skipping {contact['name']}: Failed to reload connections page after reinitialization")
                                     break
 
+                            # Wait for JavaScript to complete
+                            try:
+                                WebDriverWait(self.driver, 10).until(
+                                    lambda d: d.execute_script("return document.readyState") == "complete"
+                                )
+                                self.log(f"Page JavaScript ready for {contact['name']}")
+                            except TimeoutException as e:
+                                self.log(f"JavaScript not ready for {contact['name']}: {str(e)}")
+
+                            # Pre-wait for page stability
+                            time.sleep(random.uniform(2, 4))
+
                             # Search for contact with retries
                             contact_element = None
                             for attempt in range(3):
                                 self.log(f"Searching for {contact['name']} (attempt {attempt + 1}/3)")
                                 try:
-                                    search_input = WebDriverWait(self.driver, 30).until(
-                                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search'][type='text'], [id*='search']"))
-                                    )
-                                    self.log(f"Search input found for {contact['name']}: {search_input.get_attribute('outerHTML')[:100]}")
+                                    # Try multiple selectors for search input
+                                    selectors = [
+                                        (By.CSS_SELECTOR, "input[placeholder*='Search'][type='text'], [id*='search'], [class*='search-input'], [id*='connections-search']"),
+                                        (By.XPATH, "//input[contains(@placeholder, 'Search') or contains(@id, 'search') or contains(@class, 'search')]"),
+                                        (By.CSS_SELECTOR, "input.search-global-typeahead__input, input.global-nav__search-input"),
+                                        (By.XPATH, "//input[@role='combobox' and contains(@class, 'search')]")
+                                    ]
+                                    search_input = None
+                                    for by_type, selector in selectors:
+                                        try:
+                                            search_input = WebDriverWait(self.driver, 45).until(
+                                                EC.presence_of_element_located((by_type, selector))
+                                            )
+                                            self.log(f"Search input found for {contact['name']} with {by_type}: {selector}")
+                                            break
+                                        except TimeoutException:
+                                            self.log(f"Selector failed for {contact['name']}: {by_type} - {selector}")
+                                            continue
+
+                                    if not search_input:
+                                        raise TimeoutException("No search input found with any selector")
+
+                                    self.log(f"Search input HTML for {contact['name']}: {search_input.get_attribute('outerHTML')[:100]}")
                                     search_input.clear()
                                     time.sleep(random.uniform(0.5, 1))
                                     search_input.clear()  # Double clear to ensure empty
@@ -698,6 +729,22 @@ class LinkedInMessenger:
                                         continue
                                 except TimeoutException as e:
                                     self.log(f"Timeout finding search input for {contact['name']} (attempt {attempt + 1}): {str(e)}")
+                                    # Save HTML snippet for debugging
+                                    try:
+                                        html_snippet = self.driver.page_source[:1000]  # Limit to 1000 chars
+                                        with open(f"html_{contact['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html", "w", encoding="utf-8") as f:
+                                            f.write(html_snippet)
+                                        self.log(f"Saved HTML snippet: html_{contact['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+                                    except Exception as e:
+                                        self.log(f"Failed to save HTML snippet for {contact['name']}: {str(e)}")
+                                    # Refresh page on last attempt
+                                    if attempt == 2:
+                                        self.log(f"Refreshing page for {contact['name']} after failed attempts")
+                                        self.driver.refresh()
+                                        time.sleep(random.uniform(5, 7))
+                                        if not self.check_page_state():
+                                            self.log(f"Skipping {contact['name']}: Failed to reload page after refresh")
+                                            break
                                     continue
                                 except NoSuchElementException as e:
                                     self.log(f"Search input not found for {contact['name']} (attempt {attempt + 1}): {str(e)}")
@@ -740,7 +787,7 @@ class LinkedInMessenger:
                                 self.log(f"Clicked 'More' button for {contact['name']}")
                                 time.sleep(random.uniform(1, 2))
                             except (NoSuchElementException, TimeoutException):
-                                self.log(f"No 'More' button found for {contact['name']}") 
+                                self.log(f"No 'More' button found for {contact['name']}")
 
                             # Try multiple selectors for message button
                             message_button = None
