@@ -635,10 +635,43 @@ class LinkedInMessenger:
                             self.log(f"Skipping {contact['name']}: Contact not found in search results")
                             continue
 
+                        # Scroll to contact element
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", contact_element)
+                        time.sleep(random.uniform(0.3, 0.6))
+
+                        # Debug: Log all buttons in contact element
+                        buttons = contact_element.find_elements(By.CSS_SELECTOR, "button")
+                        button_texts = [(btn.text.strip(), btn.get_attribute("aria-label") or "", btn.get_attribute("data-control-name") or "") for btn in buttons]
+                        self.log(f"Buttons in contact element for {contact['name']}: {button_texts}")
+
+                        # Try finding message button within contact element
+                        message_button = None
+                        try:
+                            message_button = WebDriverWait(contact_element, 30).until(
+                                EC.visibility_of_element_located((By.CSS_SELECTOR, "button[class*='message'], button[aria-label*='message' i], [data-control-name*='message'], button[class*='msg']"))
+                            )
+                            WebDriverWait(contact_element, 30).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='message'], button[aria-label*='message' i], [data-control-name*='message'], button[class*='msg']"))
+                            )
+                            self.log(f"Found message button in contact element for {contact['name']}")
+                        except (TimeoutException, NoSuchElementException):
+                            self.log(f"Message button not found in contact element for {contact['name']}, trying page-wide search")
+
+                        # Fallback: Search page-wide for message button
+                        if not message_button:
+                            try:
+                                message_button = WebDriverWait(self.driver, 30).until(
+                                    EC.visibility_of_element_located((By.CSS_SELECTOR, f"button[aria-label*='{contact['name']}' i][aria-label*='message' i], button[class*='message'], [data-control-name*='message'], button[class*='msg']"))
+                                )
+                                WebDriverWait(self.driver, 30).until(
+                                    EC.element_to_be_clickable((By.CSS_SELECTOR, f"button[aria-label*='{contact['name']}' i][aria-label*='message' i], button[class*='message'], [data-control-name*='message'], button[class*='msg']"))
+                                )
+                                self.log(f"Found message button page-wide for {contact['name']}")
+                            except (TimeoutException, NoSuchElementException):
+                                self.log(f"Skipping {contact['name']}: Message button not found")
+                                continue
+
                         # Click message button
-                        message_button = WebDriverWait(contact_element, 20).until(
-                            EC.element_to_be_clickable((By.XPATH, ".//button[contains(text(), 'Message') or contains(@aria-label, 'Message') or @data-control-name='message']"))
-                        )
                         self.driver.execute_script("arguments[0].scrollIntoView(true);", message_button)
                         time.sleep(random.uniform(0.3, 0.6))
                         message_button.click()
@@ -664,7 +697,7 @@ class LinkedInMessenger:
                         )
                         send_button.click()
                         self.log(f"Sent message to {contact['name']}")
-                        time.time.sleep(random.uniform(1, 2))
+                        time.sleep(random.uniform(1, 2))
 
                         # Close message window
                         close_button = WebDriverWait(self.driver, 20).until(
