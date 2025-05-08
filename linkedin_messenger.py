@@ -116,9 +116,9 @@ class LinkedInMessenger:
         q3_frame = ttk.LabelFrame(right_pane, text="Message", padding=10)
         right_pane.add(q3_frame, weight=1)
 
-        ttk.Label(q3_frame, text="Selected Contacts & Preview:").grid(row=0, column=0, columnspan=2, padx=5, pady=5)
-        self.selected_text = scrolledtext.ScrolledText(q3_frame, height=5, width=60, state="disabled")
-        self.selected_text.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+        ttk.Label(q3_frame, text="Selected Contacts:").grid(row=0, column=0, columnspan=2, padx=5, pady=5)
+        self.selected_contacts_text = scrolledtext.ScrolledText(q3_frame, height=5, width=60, state="disabled")
+        self.selected_contacts_text.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
 
         ttk.Label(q3_frame, text="Template:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.template_combo = ttk.Combobox(q3_frame, values=[
@@ -129,9 +129,9 @@ class LinkedInMessenger:
         self.template_combo.grid(row=2, column=1, padx=5, pady=5)
         self.template_combo.bind("<<ComboboxSelected>>", self.load_template)
 
+        ttk.Label(q3_frame, text="Message:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
         self.message_text = scrolledtext.ScrolledText(q3_frame, height=5, width=60)
-        self.message_text.grid(row=3, column=0, columnspan=2, padx=5, pady=5)
-        self.message_text.bind("<KeyRelease>", self.update_preview)
+        self.message_text.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
 
         q4_frame = ttk.LabelFrame(right_pane, text="Status", padding=10)
         right_pane.add(q4_frame, weight=2)
@@ -379,7 +379,7 @@ class LinkedInMessenger:
                 contact["company"],
                 contact["industry"]
             ))
-        self.update_preview(None)
+        self.update_selected_contacts()
 
     def start_background_survey(self):
         def survey():
@@ -473,7 +473,7 @@ class LinkedInMessenger:
                 contact["company"],
                 contact["industry"]
             ))
-            self.update_preview(None)
+            self.update_selected_contacts()
 
     def sort_contacts(self, column):
         if self.sort_column == column:
@@ -506,40 +506,22 @@ class LinkedInMessenger:
     def load_template(self, event):
         self.message_text.delete("1.0", tk.END)
         self.message_text.insert("1.0", self.template_combo.get())
-        self.update_preview(None)
+        self.update_selected_contacts()
 
-    def update_preview(self, event):
-        self.selected_text.configure(state="normal")
-        self.selected_text.delete("1.0", tk.END)
+    def update_selected_contacts(self):
+        self.selected_contacts_text.configure(state="normal")
+        self.selected_contacts_text.delete("1.0", tk.END)
         selected_contacts = [c for c in self.contacts if c["selected"]]
-        message = self.message_text.get("1.0", tk.END).strip()
 
         if selected_contacts:
-            self.selected_text.insert(tk.END, "Selected Contacts:\n")
+            self.selected_contacts_text.insert(tk.END, "Selected Contacts:\n")
             for contact in selected_contacts:
-                self.selected_text.insert(tk.END, f"- {contact['name']}\n")
-            if message:
-                self.selected_text.insert(tk.END, "\nMessage Preview:\n")
-                for contact in selected_contacts[:3]:
-                    first_name = contact["name"].split()[0]
-                    try:
-                        formatted_message = message.format(
-                            first_name=first_name,
-                            name=contact["name"],
-                            job_title=contact["job_title"],
-                            company=contact["company"],
-                            industry=contact["industry"]
-                        )
-                        self.selected_text.insert(tk.END, f"To {contact['name']}:\n{formatted_message}\n\n")
-                    except KeyError:
-                        self.selected_text.insert(tk.END, f"Error: Invalid placeholder for {contact['name']}\n")
-                if len(selected_contacts) > 3:
-                    self.selected_text.insert(tk.END, f"...and {len(selected_contacts) - 3} more contacts\n")
+                self.selected_contacts_text.insert(tk.END, f"- {contact['name']}\n")
         else:
-            self.selected_text.insert(tk.END, "No contacts selected.\n")
+            self.selected_contacts_text.insert(tk.END, "No contacts selected.\n")
 
-        self.selected_text.configure(state="disabled")
-        self.selected_text.see(tk.END)
+        self.selected_contacts_text.configure(state="disabled")
+        self.selected_contacts_text.see(tk.END)
 
     def check_page_state(self):
         try:
@@ -682,7 +664,7 @@ class LinkedInMessenger:
                         )
                         send_button.click()
                         self.log(f"Sent message to {contact['name']}")
-                        time.sleep(random.uniform(1, 2))
+                        time.time.sleep(random.uniform(1, 2))
 
                         # Close message window
                         close_button = WebDriverWait(self.driver, 20).until(
