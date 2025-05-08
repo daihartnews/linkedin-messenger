@@ -246,45 +246,45 @@ class LinkedInMessenger:
             return
 
         def login():
-        try:
-            ua = UserAgent()
-            options = webdriver.ChromeOptions()
-            options.add_argument(f"user-agent={ua.random}")
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option("useAutomationExtension", False)
-            self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                "source": """
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    })
-                """
-            })
-            self.driver.get("https://www.linkedin.com/login")
-            time.sleep(random.uniform(2, 4))
+            try:
+                ua = UserAgent()
+                options = webdriver.ChromeOptions()
+                options.add_argument(f"user-agent={ua.random}")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option("useAutomationExtension", False)
+                self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+                self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        })
+                    """
+                })
+                self.driver.get("https://www.linkedin.com/login")
+                time.sleep(random.uniform(2, 4))
 
-            email_field = self.driver.find_element(By.ID, "username")
-            email_field.send_keys(email)
-            password_field = self.driver.find_element(By.ID, "password")
-            password_field.send_keys(password)
-            password_field.send_keys(Keys.RETURN)
-            time.sleep(random.uniform(5, 7))
+                email_field = self.driver.find_element(By.ID, "username")
+                email_field.send_keys(email)
+                password_field = self.driver.find_element(By.ID, "password")
+                password_field.send_keys(password)
+                password_field.send_keys(Keys.RETURN)
+                time.sleep(random.uniform(5, 7))
 
-            if "login" in self.driver.current_url:
-                self.root.after(0, lambda: self.log("Login failed: Check credentials"))
-                self.root.after(0, lambda: messagebox.showerror("Error", "Login failed. Check credentials."))
-                self.driver.quit()
-                self.driver = None
-                return
+                if "login" in self.driver.current_url:
+                    self.root.after(0, lambda: self.log("Login failed: Check credentials"))
+                    self.root.after(0, lambda: messagebox.showerror("Error", "Login failed. Check credentials."))
+                    self.driver.quit()
+                    self.driver = None
+                    return
 
-            self.root.after(0, lambda: self.log("Logged in successfully"))
-        except Exception as e:
-            self.root.after(0, lambda: self.log(f"Login error: {str(e)}"))
-            self.root.after(0, lambda: messagebox.showerror("Error", f"Login failed: {str(e)}"))
-            if self.driver:
-                self.driver.quit()
-                self.driver = None
+                self.root.after(0, lambda: self.log("Logged in successfully"))
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"Login error: {str(e)}"))
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Login failed: {str(e)}"))
+                if self.driver:
+                    self.driver.quit()
+                    self.driver = None
 
         threading.Thread(target=login, daemon=True).start()
 
@@ -417,7 +417,6 @@ class LinkedInMessenger:
 
     def survey_linkedin_contacts(self):
         try:
-            self.driver.get("https://```python
             self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(random.uniform(5, 7))
 
