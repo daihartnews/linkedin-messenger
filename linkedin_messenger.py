@@ -288,7 +288,7 @@ class LinkedInMessenger:
                         Object.defineProperty(navigator, 'languages', {
                             get: () => ['en-US', 'en']
                         });
-                        window.chrome = window.chrome | {};
+                        window.chrome = window.chrome || {};
                         window.chrome.runtime = {};
                     """
                 })
@@ -644,7 +644,7 @@ class LinkedInMessenger:
                 html_snippet = self.driver.page_source[:1000]
                 html_path = f"html_page_state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
                 with open(html_path, "w", encoding="utf-8") as f:
-                    f.write(html_snippet)
+                        f.write(html_snippet)
                 self.log(f"Saved page HTML: {html_path}")
             except Exception as e:
                 self.log(f"Failed to save page HTML: {str(e)}")
@@ -1031,7 +1031,7 @@ class LinkedInMessenger:
                                 industry=contact["industry"]
                             )
                             message_input = WebDriverWait(self.driver, 10).until(
-                               'incontroleditable"))
+                                EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable, [contenteditable='true']"))
                             )
                             message_input.send_keys(formatted_message)
                             time.sleep(random.uniform(0.3, 0.6))
