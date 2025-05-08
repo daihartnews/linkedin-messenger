@@ -900,7 +900,7 @@ class LinkedInMessenger:
                                 {"selector": ".//button[@data-control-name='message']", "context": "contact element", "type": "xpath"},
                                 # CSS Selectors (page-wide)
                                 {"selector": f"button[aria-label*='{contact['name']}' i][aria-label*='message' i], button[aria-label*='{contact['name']}' i][aria-label*='Send a message' i]", "context": "page-wide", "type": "css"},
-                                {"selector": "button[class*='message'], button[class*='msg'], button[class*='artdeco-button'],dien button[class*='pv-top-card']", "context": "page-wide", "type": "css"},
+                                {"selector": "button[class*='message'], button[class*='msg'], button[class*='artdeco-button'], button[class*='pv-top-card']", "context": "page-wide", "type": "css"},
                                 {"selector": "button[aria-label*='message' i], button[aria-label*='Send a message' i]", "context": "page-wide", "type": "css"},
                                 {"selector": "[data-control-name*='message']", "context": "page-wide", "type": "css"},
                                 # XPath Selectors (page-wide)
@@ -978,7 +978,7 @@ class LinkedInMessenger:
                             first_name = contact["name"].split()[0]
                             formatted_message = message.format(
                                 first_name=first_name,
-                                name concluding=contact["name"],
+                                name=contact["name"],
                                 job_title=contact["job_title"],
                                 company=contact["company"],
                                 industry=contact["industry"]
