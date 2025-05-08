@@ -557,7 +557,7 @@ class LinkedInMessenger:
                 self.log("CAPTCHA detected. Please resolve manually.")
                 self.root.after(0, lambda: messagebox.showinfo("CAPTCHA", "Please resolve the CAPTCHA in the browser and press OK to continue."))
                 WebDriverWait(self.driver, 60).until_not(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "[id*='captcha'], [classadina*='captcha'], iframe[src*='captcha']"))
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "[id*='captcha'], [class*='captcha'], iframe[src*='captcha']"))
                 )
                 self.log("CAPTCHA resolved, continuing")
                 return True
