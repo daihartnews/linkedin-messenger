@@ -15,8 +15,9 @@ import os
 import csv
 import threading
 from datetime import datetime, timedelta
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException, NoSuchWindowException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException, NoSuchWindowException, WebDriverException
 from fake_useragent import UserAgent
+import psutil  # Optional for system monitoring
 
 class LinkedInMessenger:
     def __init__(self, root):
@@ -150,6 +151,21 @@ class LinkedInMessenger:
         self.log_text.configure(state="disabled")
         self.log_text.see(tk.END)
 
+    def log_system_stats(self):
+        try:
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+            chrome_process = None
+            for proc in psutil.process_iter(['name']):
+                if proc.info['name'].lower() in ['chrome.exe', 'chromedriver.exe']:
+                    chrome_process = proc
+                    break
+            chrome_memory = chrome_process.memory_info().rss / 1024 / 1024 if chrome_process else 0
+            self.log(f"System stats: CPU={cpu_percent}%, Memory={memory_percent}%, Chrome Memory={chrome_memory:.2f} MB")
+        except Exception as e:
+            self.log(f"Failed to log system stats: {str(e)}")
+
     def load_contacts(self):
         if os.path.exists(self.json_file):
             try:
@@ -251,6 +267,13 @@ class LinkedInMessenger:
                 options = webdriver.ChromeOptions()
                 options.add_argument(f"user-agent={ua.random}")
                 options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--disable-web-security")
+                options.add_argument("--disable-notifications")
+                options.add_argument("--disable-popup-blocking")
+                options.add_argument("--window-size=1280,720")
                 options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 options.add_experimental_option("useAutomationExtension", False)
                 self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
@@ -258,9 +281,19 @@ class LinkedInMessenger:
                     "source": """
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined
-                        })
+                        });
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => [1, 2, 3]
+                        });
+                        Object.defineProperty(navigator, 'languages', {
+                            get: () => ['en-US', 'en']
+                        });
+                        window.chrome = window.chrome || {};
+                        window.chrome.runtime = {};
                     """
                 })
+                self.log("Navigating to LinkedIn login page")
+                self.driver.set_page_load_timeout(30)
                 self.driver.get("https://www.linkedin.com/login")
                 time.sleep(random.uniform(2, 4))
 
@@ -307,6 +340,7 @@ class LinkedInMessenger:
             try:
                 self.root.after(0, lambda: self.contacts_tree.delete(*self.contacts_tree.get_children()))
                 new_contacts = []
+                self.driver.set_page_load_timeout(30)
                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
                 time.sleep(random.uniform(5, 7))
 
@@ -417,6 +451,7 @@ class LinkedInMessenger:
 
     def survey_linkedin_contacts(self):
         try:
+            self.driver.set_page_load_timeout(30)
             self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(random.uniform(5, 7))
 
@@ -538,7 +573,30 @@ class LinkedInMessenger:
 
     def check_page_state(self):
         try:
-            WebDriverWait(self.driver, 10).until(lambda d: d.execute_script("return document.readyState") == "complete")
+            # Wait for basic HTML to load
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            self.log("Page body loaded")
+
+            # Check JavaScript readiness
+            try:
+                WebDriverWait(self.driver, 20).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                self.log("Page JavaScript completed")
+            except TimeoutException:
+                self.log("Warning: Page JavaScript did not complete, proceeding anyway")
+                # Save HTML for debugging
+                try:
+                    html_snippet = self.driver.page_source[:1000]
+                    html_path = f"html_page_load_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    with open(html_path, "w", encoding="utf-8") as f:
+                        f.write(html_snippet)
+                    self.log(f"Saved page HTML: {html_path}")
+                except Exception as e:
+                    self.log(f"Failed to save page HTML: {str(e)}")
+
             page_url = self.driver.current_url
             page_title = self.driver.title
             captcha_detected = bool(self.driver.find_elements(By.CSS_SELECTOR, "[id*='captcha'], [class*='captcha'], iframe[src*='captcha']"))
@@ -573,6 +631,21 @@ class LinkedInMessenger:
             return True
         except Exception as e:
             self.log(f"Error checking page state: {str(e)}")
+            # Save screenshot and HTML
+            try:
+                screenshot_path = f"screenshot_page_state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                self.driver.save_screenshot(screenshot_path)
+                self.log(f"Saved screenshot: {screenshot_path}")
+            except Exception as e:
+                self.log(f"Failed to save screenshot: {str(e)}")
+            try:
+                html_snippet = self.driver.page_source[:1000]
+                html_path = f"html_page_state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(html_snippet)
+                self.log(f"Saved page HTML: {html_path}")
+            except Exception as e:
+                self.log(f"Failed to save page HTML: {str(e)}")
             return False
 
     def send_messages(self):
@@ -598,8 +671,22 @@ class LinkedInMessenger:
             nonlocal successful_sends
             try:
                 self.log("Navigating to connections page")
-                self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-                time.sleep(random.uniform(5, 7))
+                self.log_system_stats()
+                self.driver.set_page_load_timeout(30)
+                for attempt in range(2):  # Retry navigation twice
+                    try:
+                        self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+                        time.sleep(random.uniform(5, 7))
+                        break
+                    except TimeoutException as e:
+                        self.log(f"Navigation timeout (attempt {attempt + 1}/2): {str(e)}")
+                        if attempt == 1:
+                            self.log("Failed to load connections page after retries. Aborting.")
+                            return
+                        self.log("Retrying navigation after refresh")
+                        self.driver.refresh()
+                        time.sleep(random.uniform(5, 7))
+
                 if not self.check_page_state():
                     self.log("Failed to load connections page. Aborting.")
                     return
@@ -624,6 +711,13 @@ class LinkedInMessenger:
                                 options = webdriver.ChromeOptions()
                                 options.add_argument(f"user-agent={ua.random}")
                                 options.add_argument("--disable-blink-features=AutomationControlled")
+                                options.add_argument("--no-sandbox")
+                                options.add_argument("--disable-dev-shm-usage")
+                                options.add_argument("--disable-gpu")
+                                options.add_argument("--disable-web-security")
+                                options.add_argument("--disable-notifications")
+                                options.add_argument("--disable-popup-blocking")
+                                options.add_argument("--window-size=1280,720")
                                 options.add_experimental_option("excludeSwitches", ["enable-automation"])
                                 options.add_experimental_option("useAutomationExtension", False)
                                 self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
@@ -631,23 +725,23 @@ class LinkedInMessenger:
                                     "source": """
                                         Object.defineProperty(navigator, 'webdriver', {
                                             get: () => undefined
-                                        })
+                                        });
+                                        Object.defineProperty(navigator, 'plugins', {
+                                            get: () => [1, 2, 3]
+                                        });
+                                        Object.defineProperty(navigator, 'languages', {
+                                            get: () => ['en-US', 'en']
+                                        });
+                                        window.chrome = window.chrome || {};
+                                        window.chrome.runtime = {};
                                     """
                                 })
+                                self.driver.set_page_load_timeout(30)
                                 self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
                                 time.sleep(random.uniform(5, 7))
                                 if not self.check_page_state():
                                     self.log(f"Skipping {contact['name']}: Failed to reload connections page after reinitialization")
                                     break
-
-                            # Wait for JavaScript to complete
-                            try:
-                                WebDriverWait(self.driver, 10).until(
-                                    lambda d: d.execute_script("return document.readyState") == "complete"
-                                )
-                                self.log(f"Page JavaScript ready for {contact['name']}")
-                            except TimeoutException as e:
-                                self.log(f"JavaScript not ready for {contact['name']}: {str(e)}")
 
                             # Pre-wait for page stability
                             time.sleep(random.uniform(2, 4))
@@ -731,7 +825,7 @@ class LinkedInMessenger:
                                     self.log(f"Timeout finding search input for {contact['name']} (attempt {attempt + 1}): {str(e)}")
                                     # Save HTML snippet for debugging
                                     try:
-                                        html_snippet = self.driver.page_source[:1000]  # Limit to 1000 chars
+                                        html_snippet = self.driver.page_source[:1000]
                                         with open(f"html_{contact['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html", "w", encoding="utf-8") as f:
                                             f.write(html_snippet)
                                         self.log(f"Saved HTML snippet: html_{contact['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
@@ -763,7 +857,7 @@ class LinkedInMessenger:
 
                             # Log contact element HTML
                             try:
-                                contact_html = contact_element.get_attribute("outerHTML")[:500]  # Limit length
+                                contact_html = contact_element.get_attribute("outerHTML")[:500]
                                 self.log(f"Contact element HTML for {contact['name']}: {contact_html}")
                             except Exception as e:
                                 self.log(f"Failed to get contact element HTML for {contact['name']}: {str(e)}")
@@ -806,7 +900,7 @@ class LinkedInMessenger:
                                 {"selector": ".//button[@data-control-name='message']", "context": "contact element", "type": "xpath"},
                                 # CSS Selectors (page-wide)
                                 {"selector": f"button[aria-label*='{contact['name']}' i][aria-label*='message' i], button[aria-label*='{contact['name']}' i][aria-label*='Send a message' i]", "context": "page-wide", "type": "css"},
-                                {"selector": "button[class*='message'], button[class*='msg'], button[class*='artdeco-button'], button[class*='pv-top-card']", "context": "page-wide", "type": "css"},
+                                {"selector": "button[class*='message'], button[class*='msg'], button[class*='artdeco-button'],dien button[class*='pv-top-card']", "context": "page-wide", "type": "css"},
                                 {"selector": "button[aria-label*='message' i], button[aria-label*='Send a message' i]", "context": "page-wide", "type": "css"},
                                 {"selector": "[data-control-name*='message']", "context": "page-wide", "type": "css"},
                                 # XPath Selectors (page-wide)
@@ -884,7 +978,7 @@ class LinkedInMessenger:
                             first_name = contact["name"].split()[0]
                             formatted_message = message.format(
                                 first_name=first_name,
-                                name=contact["name"],
+                                name concluding=contact["name"],
                                 job_title=contact["job_title"],
                                 company=contact["company"],
                                 industry=contact["industry"]
@@ -932,11 +1026,36 @@ class LinkedInMessenger:
                 self.log(f"Messages sent successfully to {successful_sends} contacts")
             except Exception as e:
                 self.log(f"Error sending messages: {str(e)}")
+                # Save debugging artifacts
+                try:
+                    screenshot_path = f"screenshot_send_messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    self.log(f"Saved screenshot: {screenshot_path}")
+                except Exception as e:
+                    self.log(f"Failed to save screenshot: {str(e)}")
+                try:
+                    html_snippet = self.driver.page_source[:1000]
+                    html_path = f"html_send_messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    with open(html_path, "w", encoding="utf-8") as f:
+                        f.write(html_snippet)
+                    self.log(f"Saved page HTML: {html_path}")
+                except Exception as e:
+                    self.log(f"Failed to save page HTML: {str(e)}")
             finally:
                 self.log(f"Messaging completed. Sent {successful_sends} messages, skipped {len(selected_contacts) - successful_sends} contacts")
                 self.send_progress["value"] = 0
 
-        threading.Thread(target=send, daemon=True).start()
+        # Run in a thread with error handling
+        try:
+            thread = threading.Thread(target=send, daemon=True)
+            thread.start()
+            thread.join(timeout=300)  # 5-minute timeout
+            if thread.is_alive():
+                self.log("Messaging thread timed out after 5 minutes")
+                self.root.after(0, lambda: messagebox.showerror("Error", "Messaging operation timed out. Please restart the application."))
+        except Exception as e:
+            self.log(f"Threading error in send_messages: {str(e)}")
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Threading error: {str(e)}"))
 
     def __del__(self):
         if self.driver:
