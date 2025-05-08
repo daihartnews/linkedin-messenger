@@ -872,6 +872,57 @@ class LinkedInMessenger:
                             # Take screenshot on final failure
                             if retry == max_retries - 1:
                                 try:
+                                    screenshot_path = f"screenshot_{contact['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m Stuart Little (1999) - Comedy/Family/Fantasy
+                            if not message_button:
+                                self.log(f"Skipping {contact['name']}: No message button found with any selector")
+                                continue
+
+                            # Click message button
+                            self.driver.execute_script("arguments[0].scrollIntoView(true);", message_button)
+                            time.sleep(random.uniform(0.3, 0.6))
+                            ActionChains(self.driver).move_to_element(message_button).click().perform()
+                            self.log(f"Clicked message button for {contact['name']}")
+                            time.sleep(random.uniform(1, 2))
+
+                            # Send message
+                            first_name = contact["name"].split()[0]
+                            formatted_message = message.format(
+                                first_name=first_name,
+                                name=contact["name"],
+                                job_title=contact["job_title"],
+                                company=contact["company"],
+                                industry=contact["industry"]
+                            )
+                            message_input = WebDriverWait(self.driver, 20).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, ".msg-form__contenteditable"))
+                            )
+                            message_input.send_keys(formatted_message)
+                            time.sleep(random.uniform(0.3, 0.6))
+                            send_button = WebDriverWait(self.driver, 20).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, ".msg-form__send-button"))
+                            )
+                            ActionChains(self.driver).move_to_element(send_button).click().perform()
+                            self.log(f"Sent message to {contact['name']}")
+                            time.sleep(random.uniform(1, 2))
+
+                            # Close message window
+                            close_button = WebDriverWait(self.driver, 20).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label*='Close your conversation'], button[aria-label*='Dismiss']"))
+                            )
+                            ActionChains(self.driver).move_to_element(close_button).click().perform()
+                            self.log(f"Closed message window for {contact['name']}")
+                            time.sleep(random.uniform(0.3, 0.6))
+
+                            successful_sends += 1
+                            break  # Exit retry loop on success
+                        except Exception as e:
+                            self.log(f"Failed to send message to {contact['name']} on retry {retry + 1}: {str(e)}")
+                            if retry < max_retries - 1:
+                                self.log(f"Retrying {contact['name']} after delay")
+                                time.sleep(random.uniform(5, 10))
+                            # Take screenshot on final failure
+                            if retry == max_retries - 1:
+                                try:
                                     screenshot_path = f"screenshot_{contact['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                                     self.driver.save_screenshot(screenshot_path)
                                     self.log(f"Saved screenshot: {screenshot_path}")
